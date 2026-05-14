@@ -1,216 +1,154 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileText, Building2, ScanSearch, Lock, Loader2, Download, Clock, AlertCircle } from "lucide-react";
+import { FileText, LayoutDashboard, LogOut, Loader2, BrainCircuit, Shield, Zap, Activity, Database, UserCircle2 } from "lucide-react";
 import { supabase } from "../supabase";
-
-// تعريف شكل البيانات القادمة من الأرشيف
-interface ArchiveItem {
-  id: string;
-  created_at: string;
-  cv_pdf_url: string | null;
-  target_job?: string;
-  package_name?: string;
-}
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [archive, setArchive] = useState<ArchiveItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [userName, setUserName] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  // 1. عند فتح الصفحة: نتأكد من المستخدم ونجلب أرشيفه
   useEffect(() => {
-    const initDashboard = async () => {
-      // التحقق من الجلسة
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        navigate("/login"); // طرد المستخدم إذا لم يسجل دخول
-        return;
+    const checkUser = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { 
+          navigate("/login"); 
+          return; 
+        }
+        
+        const fullName = session.user.user_metadata?.full_name;
+        if (fullName) {
+          setUserName(fullName.split(' ')[0]);
+        } else {
+          const email = session.user.email || "";
+          const name = email.split('@')[0];
+          setUserName(name.charAt(0).toUpperCase() + name.slice(1));
+        }
+        setLoading(false);
+      } catch (error) {
+        console.error("Dashboard Auth Error:", error);
+        setLoading(false);
       }
+    }; // <--- KENET NA2SA HAYDE (Tsakir el checkUser)
 
-      setUserEmail(session.user.email || "");
-      setUserId(session.user.id);
-
-      // جلب بيانات الأرشيف القديمة لهذا المستخدم
-      await fetchArchive(session.user.id);
-      setIsLoading(false);
-    };
-
-    initDashboard();
+    checkUser(); // <--- WA HAYDE (Kirmal el function teshteghil)
   }, [navigate]);
 
-  // دالة لجلب البيانات من Supabase
-  const fetchArchive = async (uid: string) => {
-    const { data, error } = await supabase
-      .from('cv_archive')
-      .select('*')
-      .eq('user_id', uid)
-      .order('created_at', { ascending: false }); // الأحدث أولاً
-
-    if (!error && data) {
-      setArchive(data);
-    }
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/");
   };
 
-  // 2. اشتراك Realtime (السحر هنا ✨)
-  // هذا الكود يستمع لأي تغيير في قاعدة البيانات ليحدث الصفحة فوراً
-  useEffect(() => {
-    if (!userId) return;
-
-    const channel = supabase
-      .channel('archive-updates')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'cv_archive', filter: `user_id=eq.${userId}` },
-        (payload) => {
-          console.log("New CV generated!", payload);
-          // إضافة الملف الجديد للقائمة فوراً
-          setArchive((prev) => [payload.new as ArchiveItem, ...prev]);
-        }
-      )
-      .on(
-        'postgres_changes', 
-        { event: 'UPDATE', schema: 'public', table: 'cv_archive', filter: `user_id=eq.${userId}` },
-        (payload) => {
-           // تحديث حالة ملف موجود (مثلاً: تحول من جاري المعالجة إلى جاهز)
-           setArchive((prev) => prev.map(item => item.id === payload.new.id ? payload.new as ArchiveItem : item));
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId]);
-
-  const handleStartBuilding = () => {
-    if (userEmail) {
-      navigate(`/builder?email=${userEmail}`); 
-    }
-  };
-
-  if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin w-8 h-8 text-blue-600"/></div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#050B14]">
+        <Loader2 className="animate-spin text-cyan-500 w-12 h-12"/>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans p-6 lg:p-12">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-[#050B14] text-slate-300 font-sans relative overflow-x-hidden flex flex-col">
+      
+      {/* Background Cyber Lights */}
+      <div className="absolute top-0 right-0 w-[70vw] h-[70vw] bg-cyan-600/5 rounded-full blur-[150px] pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[60vw] h-[60vw] bg-fuchsia-600/5 rounded-full blur-[150px] pointer-events-none" />
+      
+      <div className="relative z-10 max-w-7xl w-full mx-auto px-6 py-12 flex-1">
         
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-end mb-12 gap-4">
+        {/* Welcome Section */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-16 gap-6 border-b border-white/5 pb-12">
             <div>
-                <h1 className="text-3xl font-bold text-slate-900">Welcome Back 👋</h1>
-                <p className="text-slate-500 mt-2">Manage your career profile and access exclusive tools.</p>
+                <div className="flex items-center gap-2 text-cyan-500 mb-3">
+                    <Activity className="w-4 h-4" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.4em]">Node Online</span>
+                </div>
+                <h1 className="text-4xl lg:text-6xl font-black text-white tracking-tighter uppercase mb-2">
+                    Welcome, <span className="text-cyan-400">{userName}</span>
+                </h1>
+                <p className="text-slate-500 font-medium tracking-wide">Select a protocol to initialize your career engine.</p>
             </div>
+            
             <button 
-                onClick={handleStartBuilding}
-                className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition flex items-center gap-2 shadow-lg hover:shadow-xl transform active:scale-95 duration-200"
+                onClick={handleLogout} 
+                className="flex items-center gap-3 px-6 py-3 bg-red-500/5 border border-red-500/20 rounded-2xl text-red-400 hover:bg-red-500/10 transition-all duration-300 text-[10px] font-black uppercase tracking-widest"
             >
-                <FileText className="w-5 h-5"/> Build New CV
+                <LogOut className="w-4 h-4" /> Terminate Session
             </button>
         </div>
 
-        {/* --- قسم الأرشيف (الجديد كلياً) --- */}
-        <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm mb-12">
-            <h2 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
-                <Clock className="w-5 h-5 text-blue-600"/> CV History & Downloads
-            </h2>
+        {/* --- Cyber Grid Nodes --- */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
 
-            {archive.length === 0 ? (
-                <div className="text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
-                    <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-3">
-                        <AlertCircle className="w-6 h-6 text-slate-400"/>
-                    </div>
-                    <p className="text-slate-500 font-medium">No CVs generated yet.</p>
-                    <button onClick={handleStartBuilding} className="text-blue-600 font-bold text-sm mt-2 hover:underline">Create your first one now</button>
+            {/* Node 1: Build */}
+            <div 
+                onClick={() => navigate('/builder')}
+                className="relative bg-[#0A1324]/60 backdrop-blur-md p-10 rounded-[2.5rem] border border-white/5 hover:border-cyan-500/40 transition-all duration-500 cursor-pointer group min-h-[400px] flex flex-col items-center justify-center text-center shadow-2xl"
+            >
+                <div className="w-24 h-24 bg-cyan-500/10 border border-cyan-500/20 rounded-3xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(6,182,212,0.1)]">
+                    <FileText className="w-10 h-10 text-cyan-400"/>
                 </div>
-            ) : (
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="text-slate-400 text-sm border-b border-slate-100">
-                                <th className="py-4 font-medium pl-4">Date</th>
-                                <th className="py-4 font-medium">Target Job</th>
-                                <th className="py-4 font-medium">Status</th>
-                                <th className="py-4 font-medium text-right pr-4">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {archive.map((item) => (
-                                <tr key={item.id} className="hover:bg-slate-50 transition group">
-                                    <td className="py-4 pl-4 text-slate-600 font-medium">
-                                        {new Date(item.created_at).toLocaleDateString('en-GB')}
-                                    </td>
-                                    <td className="py-4 text-slate-900 font-bold">
-                                        {item.target_job || "General CV"}
-                                    </td>
-                                    <td className="py-4">
-                                        {item.cv_pdf_url ? (
-                                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
-                                                <span className="w-2 h-2 rounded-full bg-green-600"></span> Ready
-                                            </span>
-                                        ) : (
-                                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-700 animate-pulse">
-                                                <Loader2 className="w-3 h-3 animate-spin"/> Processing...
-                                            </span>
-                                        )}
-                                    </td>
-                                    <td className="py-4 text-right pr-4">
-                                        {item.cv_pdf_url ? (
-                                            <a 
-                                                href={item.cv_pdf_url} 
-                                                target="_blank" 
-                                                rel="noreferrer"
-                                                className="inline-flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 transition shadow-sm hover:shadow"
-                                            >
-                                                <Download className="w-4 h-4"/> Download
-                                            </a>
-                                        ) : (
-                                            <span className="text-slate-400 text-xs font-medium cursor-wait bg-slate-100 px-3 py-2 rounded-lg">Please wait...</span>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                <h2 className="text-2xl font-black text-white mb-3 uppercase">Build Protocol</h2>
+                <p className="text-slate-500 mb-10 text-sm font-medium leading-relaxed max-w-[220px]">Industrial-grade ATS resume infrastructure.</p>
+                <div className="w-full bg-cyan-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest group-hover:bg-cyan-500 transition-all shadow-lg">
+                    Launch Builder &rarr;
                 </div>
-            )}
+            </div>
+
+            {/* Node 2: Analyze */}
+            <div 
+                onClick={() => navigate('/career-analysis')} 
+                className="relative bg-[#0A1324]/60 backdrop-blur-md p-10 rounded-[2.5rem] border border-white/5 hover:border-fuchsia-500/40 transition-all duration-500 cursor-pointer group min-h-[400px] flex flex-col items-center justify-center text-center shadow-2xl"
+            >
+                <div className="w-24 h-24 bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-3xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(217,70,239,0.1)]">
+                    <BrainCircuit className="w-10 h-10 text-fuchsia-400"/> 
+                </div>
+                <h2 className="text-2xl font-black text-white mb-3 uppercase">AI Analyzer</h2>
+                <p className="text-slate-500 mb-10 text-sm font-medium leading-relaxed max-w-[220px]">Neural network keyword optimization.</p>
+                <div className="w-full bg-fuchsia-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest group-hover:bg-fuchsia-500 transition-all shadow-lg">
+                    Start Scan &rarr;
+                </div>
+            </div>
+
+            {/* Node 3: Account */}
+            <div 
+                onClick={() => navigate('/my-account')} 
+                className="relative bg-[#0A1324]/40 backdrop-blur-md p-10 rounded-[2.5rem] border border-white/5 hover:border-white/20 transition-all duration-500 cursor-pointer group min-h-[400px] flex flex-col items-center justify-center text-center shadow-xl"
+            >
+                <div className="w-24 h-24 bg-white/5 border border-white/10 rounded-3xl flex items-center justify-center mb-8 group-hover:bg-white/10 transition-colors">
+                    <LayoutDashboard className="w-10 h-10 text-slate-500 group-hover:text-white transition-colors"/>
+                </div>
+                <h2 className="text-2xl font-black text-white mb-3 uppercase">Data Archive</h2>
+                <p className="text-slate-500 mb-10 text-sm font-medium leading-relaxed max-w-[220px]">Manage encrypted history and tiers.</p>
+                <div className="w-full bg-white/5 text-slate-500 border border-white/10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest group-hover:bg-white group-hover:text-black transition-all">
+                    Access Data &rarr;
+                </div>
+            </div>
+
+
+            {/* Node 4: Profile */}
+            <div
+                onClick={() => navigate('/profile')}
+                className="relative bg-[#0A1324]/60 backdrop-blur-md p-10 rounded-[2.5rem] border border-white/5 hover:border-violet-500/40 transition-all duration-500 cursor-pointer group min-h-[400px] flex flex-col items-center justify-center text-center shadow-2xl md:col-span-2 lg:col-span-3"
+            >
+                <div className="w-24 h-24 bg-violet-500/10 border border-violet-500/20 rounded-3xl flex items-center justify-center mb-8 group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(139,92,246,0.1)]">
+                    <UserCircle2 className="w-10 h-10 text-violet-400"/>
+                </div>
+                <h2 className="text-2xl font-black text-white mb-3 uppercase">Identity Node</h2>
+                <p className="text-slate-500 mb-10 text-sm font-medium leading-relaxed max-w-[280px]">Your professional profile — headline, experience, and skills.</p>
+                <div className="bg-violet-600 text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest group-hover:bg-violet-500 transition-all shadow-lg">
+                    View Profile &rarr;
+                </div>
+            </div>
+
         </div>
 
-        {/* --- باقي الكروت (Employers & ATS) --- */}
-        <div className="grid md:grid-cols-2 gap-8">
-          
-          {/* Employers Guide */}
-          <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm relative group hover:shadow-md transition cursor-pointer" onClick={() => navigate('/premium-links')}>
-            <div className="absolute top-4 right-4 bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
-              <Lock className="w-3 h-3" /> Exclusive
-            </div>
-            <div className="bg-amber-50 w-12 h-12 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-              <Building2 className="w-6 h-6 text-amber-600" />
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">Employers Guide</h2>
-            <p className="text-slate-500 text-sm mb-4">
-              Access database of top hiring companies in MENA with direct HR contacts.
-            </p>
-            <span className="text-blue-600 font-bold text-sm hover:underline flex items-center gap-1">View Companies <ArrowRight className="w-4 h-4"/></span>
-          </div>
-
-          {/* ATS Checker (Coming Soon) */}
-          <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm relative opacity-75">
-            <div className="absolute top-4 right-4 bg-purple-100 text-purple-800 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
-              <Lock className="w-3 h-3" /> Coming Soon
-            </div>
-            <div className="bg-purple-50 w-12 h-12 rounded-xl flex items-center justify-center mb-6">
-              <ScanSearch className="w-6 h-6 text-purple-600" />
-            </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">ATS Score Checker</h2>
-            <p className="text-slate-500 text-sm">
-              Compare your CV against any job description to see your match score and AI tips.
-            </p>
-          </div>
+        {/* System Monitoring */}
+        <div className="mt-20 flex flex-wrap justify-center gap-12 opacity-30 pointer-events-none">
+             <div className="flex items-center gap-2"><Shield className="w-4 h-4"/> <span className="text-[10px] font-black uppercase tracking-widest">Encrypted</span></div>
+             <div className="flex items-center gap-2"><Zap className="w-4 h-4"/> <span className="text-[10px] font-black uppercase tracking-widest">Real-time</span></div>
+             <div className="flex items-center gap-2"><Database className="w-4 h-4" /> <span className="text-[10px] font-black uppercase tracking-widest">Cloud Node</span></div>
         </div>
 
       </div>

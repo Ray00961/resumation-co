@@ -1,87 +1,98 @@
-import { Facebook, Twitter, Linkedin, Instagram, MapPin, Mail, Phone } from "lucide-react";
+import { Facebook, Twitter, Linkedin, Instagram, Mail, MessageCircle, MapPin, Shield, Cpu, Globe } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export default function Footer() {
   return (
-    <footer className="bg-[#0f172a] text-white py-16 border-t border-slate-800 font-sans">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8">
+    <footer className="bg-[#03070C] text-slate-400 py-16 border-t border-cyan-500/10 font-sans relative overflow-hidden">
+      
+      {/* Background Decorative Element */}
+      <div className="absolute bottom-0 right-0 w-64 h-64 bg-cyan-500/5 blur-[100px] pointer-events-none" />
+
+      <div className="max-w-7xl mx-auto px-6 lg:px-16 relative z-10">
         
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
+        {/* Top Section: Brand & Links */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-12 mb-16">
           
-          {/* Brand Section: اللوجو والوصف */}
-          <div className="col-span-1 md:col-span-1">
-            <h2 className="text-2xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
-              Resumate.ai
-            </h2>
-            <p className="text-slate-400 text-sm leading-relaxed mb-6">
-              The smartest way to build your career. Our AI engine ensures your CV gets past the robots and lands on the recruiter's desk.
+          {/* Brand Identity Section */}
+          <div className="md:col-span-5">
+            <div className="flex items-center gap-2 mb-6">
+               <Shield className="w-6 h-6 text-cyan-400" />
+               <span className="text-2xl font-black tracking-tighter text-white">
+                Resumation<span className="text-cyan-400">.co</span>
+              </span>
+            </div>
+            <p className="text-sm leading-relaxed mb-8 max-w-sm font-medium opacity-80">
+              نظام هندسي متكامل مدعوم بالذكاء الاصطناعي لضمان تفوق سيرتك الذاتية في أنظمة التوظيف العالمية وتأمين مستقبلك المهني.
+              <br />
+              <span className="block mt-2 text-[11px] uppercase tracking-widest text-cyan-500/80 font-black">Industrial Career Infrastructure</span>
             </p>
-            <div className="flex gap-4">
-              <a href="#" className="bg-slate-800 p-2 rounded-full hover:bg-blue-600 transition"><Linkedin className="w-4 h-4" /></a>
-              <a href="#" className="bg-slate-800 p-2 rounded-full hover:bg-blue-400 transition"><Twitter className="w-4 h-4" /></a>
-              <a href="#" className="bg-slate-800 p-2 rounded-full hover:bg-blue-800 transition"><Facebook className="w-4 h-4" /></a>
-              <a href="#" className="bg-slate-800 p-2 rounded-full hover:bg-pink-600 transition"><Instagram className="w-4 h-4" /></a>
+            <div className="flex gap-3">
+              <a href="#" className="w-10 h-10 flex items-center justify-center bg-white/5 border border-white/10 rounded-xl hover:border-cyan-400/50 hover:text-cyan-400 transition-all duration-300"><Linkedin className="w-4 h-4" /></a>
+              <a href="#" className="w-10 h-10 flex items-center justify-center bg-white/5 border border-white/10 rounded-xl hover:border-cyan-400/50 hover:text-cyan-400 transition-all duration-300"><Facebook className="w-4 h-4" /></a>
+              <a href="#" className="w-10 h-10 flex items-center justify-center bg-white/5 border border-white/10 rounded-xl hover:border-cyan-400/50 hover:text-cyan-400 transition-all duration-300"><Instagram className="w-4 h-4" /></a>
             </div>
           </div>
 
-          {/* Links: Company */}
-          <div>
-            <h3 className="font-bold text-lg mb-4 text-white">Company</h3>
-            <ul className="space-y-3 text-sm text-slate-400">
-              <li><a href="#" className="hover:text-blue-400 transition">About Us</a></li>
-              <li><a href="#" className="hover:text-blue-400 transition">How it Works</a></li>
-              <li><a href="#pricing" className="hover:text-blue-400 transition">Pricing</a></li>
+          {/* Links Column 1: Services */}
+          <div className="md:col-span-2">
+            <h3 className="text-[11px] font-black text-white uppercase tracking-[0.2em] mb-6">Services</h3>
+            <ul className="space-y-4 text-xs font-bold uppercase tracking-widest">
+              <li><Link to="/build" className="hover:text-cyan-400 transition-colors">Build AI CV</Link></li>
+              <li><Link to="/analyse" className="hover:text-cyan-400 transition-colors">ATS Analysis</Link></li>
+              <li><Link to="/pricing" className="hover:text-cyan-400 transition-colors">Pricing</Link></li>
+              <li><Link to="/templates" className="hover:text-cyan-400 transition-colors">Templates</Link></li>
             </ul>
           </div>
 
-          {/* Links: Resources */}
-          <div>
-            <h3 className="font-bold text-lg mb-4 text-white">Resources</h3>
-            <ul className="space-y-3 text-sm text-slate-400">
-              <li><a href="#" className="hover:text-blue-400 transition">CV Templates</a></li>
-              <li><a href="#" className="hover:text-blue-400 transition">Career Blog</a></li>
-              <li><a href="#" className="hover:text-blue-400 transition">ATS Checker</a></li>
+          {/* Links Column 2: Company */}
+          <div className="md:col-span-2">
+            <h3 className="text-[11px] font-black text-white uppercase tracking-[0.2em] mb-6">Company</h3>
+            <ul className="space-y-4 text-xs font-bold uppercase tracking-widest">
+              <li><Link to="/about" className="hover:text-cyan-400 transition-colors">About Us</Link></li>
+              <li><Link to="/account" className="hover:text-cyan-400 transition-colors">Account</Link></li>
+              <li><Link to="/contact" className="hover:text-cyan-400 transition-colors">Support</Link></li>
+              <li><Link to="/blog" className="hover:text-cyan-400 transition-colors">AI Insights</Link></li>
             </ul>
           </div>
 
-          {/* Links: Contact */}
-          <div>
-            <h3 className="font-bold text-lg mb-4 text-white">Contact</h3>
-            <ul className="space-y-3 text-sm text-slate-400">
-              <li className="flex items-center gap-2">
-                <Mail className="w-4 h-4 text-blue-500" />
-                <span>support@resumate.ai</span>
+          {/* Links Column 3: Contact */}
+          <div className="md:col-span-3">
+            <h3 className="text-[11px] font-black text-white uppercase tracking-[0.2em] mb-6">Contact Node</h3>
+            <ul className="space-y-4 text-xs font-bold tracking-widest">
+              <li className="flex items-center gap-3 group cursor-pointer">
+                <Mail className="w-4 h-4 text-cyan-400 group-hover:animate-pulse" />
+                <span className="group-hover:text-white transition-colors">support@resumation.co</span>
               </li>
-              <li className="flex items-center gap-2">
-                <Phone className="w-4 h-4 text-blue-500" />
-                <span dir="ltr">+20 120 573 3992</span>
+              <li className="flex items-center gap-3 group cursor-pointer" dir="ltr">
+                <MessageCircle className="w-4 h-4 text-emerald-500" />
+                <a href="https://wa.me/201515770632" target="_blank" rel="noreferrer" className="group-hover:text-white transition-colors">+20 151 577 0632</a>
               </li>
-               <li className="flex items-center gap-2">
-                <Phone className="w-4 h-4 text-blue-500" />
-                <span dir="ltr">+961 70 034 979</span>
+              <li className="flex items-center gap-3 group cursor-pointer" dir="ltr">
+                <MessageCircle className="w-4 h-4 text-emerald-500" />
+                <a href="https://wa.me/96170000000" target="_blank" rel="noreferrer" className="group-hover:text-white transition-colors">+961 70 000 000</a>
               </li>
             </ul>
           </div>
         </div>
 
-        {/* 🇱🇧 🇪🇬 Partnership Badge */}
-        <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-8 text-center border border-slate-700/50 mb-8 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-600 via-white to-red-600 opacity-20"></div>
-            
-            <div className="flex items-center justify-center gap-2 text-yellow-500 font-bold mb-2">
-                <MapPin className="w-5 h-5" /> Lebanese-Egyptian Partnership
+        {/* Bottom Section: Compliance & Partnership */}
+        <div className="pt-10 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-8">
+          
+          <div className="flex flex-col md:flex-row items-center gap-4 md:gap-8">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">
+              © 2026 Resumation.co <span className="mx-2">|</span> AI Infrastructure
+            </span>
+            <div className="flex items-center gap-2 px-4 py-1.5 bg-cyan-500/5 rounded-full border border-cyan-500/10">
+              <MapPin className="w-3 h-3 text-cyan-500" />
+              <span className="text-[9px] font-black text-cyan-500 uppercase tracking-widest">Lebanese-Egyptian Tech Alliance</span>
             </div>
-            <p className="text-slate-400 text-sm">
-                Bridging talent across MENA with innovation from <span className="text-white font-semibold">Beirut</span> and <span className="text-white font-semibold">Cairo</span>.
-            </p>
-        </div>
-
-        {/* Copyright */}
-        <div className="text-center text-slate-600 text-xs border-t border-slate-800 pt-8 flex flex-col md:flex-row justify-between items-center">
-          <span>© 2026 Resumate.ai. All rights reserved.</span>
-          <div className="flex gap-4 mt-4 md:mt-0">
-            <a href="#" className="hover:text-slate-400">Privacy Policy</a>
-            <a href="#" className="hover:text-slate-400">Terms of Service</a>
           </div>
+
+          <div className="flex gap-8 text-[10px] font-black uppercase tracking-widest">
+            <Link to="/privacy" className="text-slate-500 hover:text-cyan-400 transition-colors">Privacy Node</Link>
+            <Link to="/terms" className="text-slate-500 hover:text-cyan-400 transition-colors">Protocol Terms</Link>
+          </div>
+          
         </div>
 
       </div>

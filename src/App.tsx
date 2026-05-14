@@ -1,57 +1,119 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 
-// استيراد مكونات الصفحة الرئيسية
-import Hero from "./components/Hero";
-import PricingCard from "./components/PricingCard";
+// استيراد المكونات الأساسية (Layout)
+import Header from "./components/Header";
 import Footer from "./components/Footer";
 
-// استيراد الصفحات الأخرى
+// استيراد مكونات الصفحة الرئيسية
+import Hero from "./components/Hero";
+
+// استيراد الصفحات الأساسية
+import PricingDescription from "./components/PricingDescription"; 
 import PlansPage from "./components/PlansPage";
-import PremiumLinks from "./PremiumLinks"; 
-import GoldLinks from "./GoldLinks"; 
 import SuccessPage from "./components/SuccessPage";
 import LoginPage from "./components/LoginPage";
 import Dashboard from "./components/Dashboard";
-import BuilderPage from "./components/BuilderPage"; // <--- 1. استيراد صفحة البيلدر
+import BuilderPage from "./components/BuilderPage";
+import CareerAnalysis from "./components/CareerAnalysis"; 
+import MyAccount from "./components/MyAccount";
+import PackageAccess from "./components/PackageAccess";
+import ContactPage from "./components/ContactPage";
+import Profile from "./pages/Profile";
+
+// استيراد الصفحات القانونية
+import Terms from "./components/Terms";
+import Privacy from "./components/Privacy";
+
+// استيراد مراقب الإشعارات
+import NotificationListener from "./components/NotificationListener";
+
+// استيراد صفحات الروابط المصنفة حسب الباقة ✅
+import FreeLinks from "./FreeLinks"; 
+import PremiumLinks from "./PremiumLinks"; 
+import GoldLinks from "./GoldLinks"; 
+import AnalysisLinks from "./AnalysisLinks"; 
+
+// FIXED: إضافة مكون بسيط لصفحة 404 (فيك تغير تصميمه لاحقاً)
+const NotFound = () => (
+  <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+    <h1 className="text-6xl font-black text-cyan-500 mb-4">404</h1>
+    <p className="text-xl text-slate-600 mb-8">عذراً، هذه الصفحة غير موجودة.</p>
+    <a href="/" className="bg-cyan-600 text-white px-6 py-2 rounded-lg font-bold">العودة للرئيسية</a>
+  </div>
+);
 
 export default function App() {
   return (
     <Router>
-      <div className="min-h-screen">
-        <Routes>
-          
-          {/* الصفحة الرئيسية */}
-          <Route path="/" element={
-            <div className="bg-gradient-to-b from-slate-50 to-white">
-              <Hero />
-              <PricingCard />
-              <Footer />
-            </div>
-          } />
+      <div className="flex flex-col min-h-screen bg-slate-50">
+        
+        {/* تشغيل المراقب في الخلفية */}
+        <NotificationListener />
 
-          {/* صفحة تسجيل الدخول */}
-          <Route path="/login" element={<LoginPage />} />
+        {/* الـ Header سيظهر في كل الصفحات */}
+        <Header />
 
-          {/* صفحة الداشبورد (لوحة التحكم) */}
-          <Route path="/dashboard" element={<Dashboard />} />
+        {/* محتوى الصفحات المتغير */}
+        <main className="flex-grow">
+          <Routes>
+            
+            {/* الصفحة الرئيسية */}
+            <Route path="/" element={<Hero />} />
 
-          {/* صفحة بناء السيرة الذاتية (الفورم) */}
-          <Route path="/builder" element={<BuilderPage />} /> {/* <--- 2. المسار الجديد */}
+            {/* صفحة وصف الباقات (Pricing) */}
+            <Route path="/pricing" element={<PricingDescription />} />
 
-          {/* صفحة اختيار الخطط */}
-          <Route path="/plans" element={<PlansPage />} />
+            {/* صفحة تسجيل الدخول */}
+            <Route path="/login" element={<LoginPage />} />
 
-          {/* الصفحات المخفية */}
-          <Route path="/premium-links" element={<PremiumLinks />} />
-          <Route path="/gold-links" element={<GoldLinks />} />
+            {/* صفحة الداشبورد وحسابي */}
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/account" element={<MyAccount />} />
+            <Route path="/my-account" element={<MyAccount />} />
 
-          {/* صفحة النجاح بعد الدفع */}
-          <Route path="/success" element={<SuccessPage />} />
+            {/* بناء السيرة الذاتية وتحليل المسار */}
+            <Route path="/build" element={<BuilderPage />} />
+            <Route path="/builder" element={<BuilderPage />} />
+            <Route path="/analyse" element={<CareerAnalysis />} />
+            <Route path="/career-analysis" element={<CareerAnalysis />} />
 
-        </Routes>
+            {/* صفحة الخطط والوصول للباقة */}
+            <Route path="/plans" element={<PlansPage />} />
+            <Route path="/package-access" element={<PackageAccess />} />
 
-        <Toaster />
+            {/* --- نظام روابط التوظيف المخصص حسب الباقة --- */}
+            <Route path="/free-links" element={<FreeLinks />} />
+            <Route path="/premium-links" element={<PremiumLinks />} />
+            <Route path="/gold-links" element={<GoldLinks />} />
+            <Route path="/analysis-links" element={<AnalysisLinks />} />
+            
+            {/* للرجوع الخلفي (Backward Compatibility) */}
+            <Route path="/employer-links" element={<AnalysisLinks />} /> 
+
+            {/* الصفحات القانونية */}
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
+
+            {/* صفحة النجاح بعد الدفع */}
+            <Route path="/success" element={<SuccessPage />} />
+
+            <Route path="/contact" element={<ContactPage />} />
+            <Route path="/profile" element={<Profile />} />
+
+            {/* FIXED: إضافة Route لأي مسار غير معرف ليعرض صفحة 404 */}
+            <Route path="*" element={<NotFound />} />
+            
+
+          </Routes>
+        </main>
+
+        {/* الـ Footer سيظهر في أسفل كل الصفحات */}
+        <Footer />
+
+        {/* الإشعارات - FIXED: شلنا الـ Toaster التاني اللي كان بـ MyAccount (حسب نصيحة كلوود) */}
+        {/* هيدا الـ Toaster هون بيكفي لكل المشروع */}
+        <Toaster position="top-center" richColors closeButton />
       </div>
     </Router>
   );

@@ -1,109 +1,160 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CheckCircle, Loader2, ArrowRight } from "lucide-react";
+import { CheckCircle, Loader2, ArrowRight, Mail, Hash, FileText, Activity, ShieldCheck, Zap } from "lucide-react";
 import { motion } from "framer-motion";
+import { supabase } from "../supabase"; 
 
 export default function SuccessPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
   const [loading, setLoading] = useState(false);
-  const [targetPath, setTargetPath] = useState("/premium-links"); 
   const [planName, setPlanName] = useState("Premium Package");
+  const [currentUser, setCurrentUser] = useState<{id: string, email: string, sid?: string} | null>(null);
 
-  // paymobId: الرقم القصير (397601250) -> هذا اللي رح نبعته للويب هوك
-  const paymobId = searchParams.get("id") || searchParams.get("order"); 
-  
-  // merchantRef: الرقم الطويل (ORDER_GOLD_...) -> هذا بس عشان نعرف نوجه الزبون وين يروح
+  const paymobOrderId = searchParams.get("order") || searchParams.get("id"); 
   const merchantRef = searchParams.get("merchant_order_id") || "";
   const amountCents = searchParams.get("amount_cents"); 
 
   useEffect(() => {
-    // هذا الكود فقط لتحديد الوجهة (Gold ولا Premium)
-    // لا يؤثر على الويب هوك
-    if (amountCents === "25000" || merchantRef.includes("GOLD")) {
-      setTargetPath("/gold-links");
-      setPlanName("Gold Package");
-    } else if (amountCents === "5000" || merchantRef.includes("PREMIUM")) {
-      setTargetPath("/premium-links");
-      setPlanName("Premium Package");
-    } else {
-      setTargetPath("/premium-links");
-      setPlanName("Premium Package");
-    }
-  }, [merchantRef, amountCents]);
+    const fetchData = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('submission_id')
+          .eq('id', session.user.id)
+          .single();
+
+        setCurrentUser({
+          id: session.user.id,
+          email: session.user.email || "",
+          sid: userData?.submission_id || "NOT_FOUND" 
+        });
+      } else {
+        navigate("/login");
+      }
+
+      if (merchantRef.includes("GOLD") || amountCents === "25000") {
+        setPlanName("Gold Package");
+      } else {
+        setPlanName("Premium Package");
+      }
+    };
+    fetchData();
+  }, [merchantRef, amountCents, navigate]);
 
   const handleGetPackage = async () => {
+    if (!currentUser) return;
     setLoading(true);
 
     const webhookUrl = "https://hook.eu1.make.com/w1nmxyrd786vy4pv8exdba5vy58i1mnm";
+    const detectedPlan = planName.toLowerCase().includes("gold") ? "gold" : "premium";
 
     try {
-      if (paymobId || merchantRef) {
-          await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-              // ✅ رجعنا order_id ليكون رقم Paymob القصير عشان ما يخرب شغلك في Make
-              order_id: paymobId, 
-              
-              // أرسلت الـ merchantRef في خانة جديدة اسمها ref_id (اختياري) لو احتجتها مستقبلاً، ما بتأثر عالحالية
-              ref_id: merchantRef,
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          selected_plan: detectedPlan, 
+          payment_status: true 
+        })
+        .eq('id', currentUser.id); 
 
-              amount: amountCents,
-              status: "confirmed",
-              source: "resumation_success_page"
-            }),
-          });
-      }
+      if (error) throw error;
       
-      setTimeout(() => {
-        navigate(`${targetPath}?paid=true`); 
-      }, 2000);
-
+      await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          user_id: currentUser.id,
+          login_email: currentUser.email,
+          submission_id: currentUser.sid, 
+          paymob_order_id: paymobOrderId,
+          plan: detectedPlan,
+          amount: amountCents,
+          status: "confirmed"
+        }),
+      });
+      
+      setTimeout(() => navigate("/package-access"), 1500);
     } catch (error) {
-      console.error("Connection Error:", error);
-      navigate(`${targetPath}?paid=true`); 
+      console.error("Update Error:", error);
+      navigate("/package-access"); 
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
-      <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full text-center border border-slate-100">
+    <div className="min-h-screen bg-[#050B14] flex items-center justify-center p-6 font-sans relative overflow-hidden">
+      
+      {/* Cyber Ambience */}
+      <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-emerald-500/5 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[40vw] h-[40vw] bg-cyan-600/5 rounded-full blur-[100px] pointer-events-none" />
+
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-[#0A1324]/60 backdrop-blur-2xl p-10 rounded-[2.5rem] border border-emerald-500/20 max-w-md w-full text-center shadow-2xl relative"
+      >
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent" />
         
         {!loading ? (
-          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <CheckCircle className="w-10 h-10 text-green-600" />
+          <>
+            <div className="w-20 h-20 bg-emerald-500/10 border border-emerald-500/20 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-[0_0_30px_rgba(16,185,129,0.1)]">
+              <CheckCircle className="w-10 h-10 text-emerald-400" />
             </div>
             
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">Payment Verified ✅</h1>
-            <p className="text-slate-500 mb-8">
-              You have secured the <span className="font-bold text-slate-900">{planName}</span>.
-            </p>
-
-            <button
-              onClick={handleGetPackage}
-              className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition shadow-lg hover:shadow-xl flex items-center justify-center gap-2 group"
-            >
-              Get your package now <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform"/>
-            </button>
-          </motion.div>
-        ) : (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-10">
-            <div className="relative w-20 h-20 mx-auto mb-6">
-                <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div>
-                <Loader2 className="absolute inset-0 m-auto w-8 h-8 text-blue-600 animate-pulse" />
+            <h1 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Protocol <span className="text-emerald-400">Verified</span></h1>
+            <div className="flex items-center justify-center gap-2 mb-8">
+               <Activity className="w-3 h-3 text-emerald-500 animate-pulse" />
+               <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Transaction Secured</span>
             </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">Processing Your Request...</h2>
-            <p className="text-slate-500 text-sm animate-pulse">
-              Unlocking employer database...
-            </p>
-          </motion.div>
-        )}
+            
+            <div className="bg-[#050B14]/60 rounded-2xl p-6 mb-10 text-left border border-white/5 space-y-5">
+              <div className="flex items-start gap-4 border-b border-white/5 pb-4">
+                <Mail className="w-4 h-4 text-cyan-400 mt-1" />
+                <div className="overflow-hidden">
+                  <p className="text-[9px] uppercase text-slate-500 font-black tracking-widest mb-1">Entity Linked</p>
+                  <p className="text-sm font-bold text-slate-200 truncate">{currentUser?.email}</p>
+                </div>
+              </div>
 
-      </div>
+              <div className="flex items-start gap-4 border-b border-white/5 pb-4">
+                <FileText className="w-4 h-4 text-emerald-400 mt-1" />
+                <div>
+                  <p className="text-[9px] uppercase text-slate-500 font-black tracking-widest mb-1">Trace ID (SID)</p>
+                  <p className="text-sm font-black text-white tracking-widest">{currentUser?.sid}</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4">
+                <Hash className="w-4 h-4 text-cyan-400 mt-1" />
+                <div>
+                  <p className="text-[9px] uppercase text-slate-500 font-black tracking-widest mb-1">Payment Hash</p>
+                  <p className="text-sm font-bold text-cyan-500 font-mono tracking-tighter">{paymobOrderId}</p>
+                </div>
+              </div>
+            </div>
+
+            <button 
+              onClick={handleGetPackage} 
+              className="w-full py-5 bg-emerald-600 text-white font-black rounded-2xl flex items-center justify-center gap-3 uppercase text-xs tracking-widest hover:bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.2)] transition-all"
+            >
+              Initialize Deployment <ArrowRight className="w-4 h-4"/>
+            </button>
+            
+            <div className="mt-8 flex items-center justify-center gap-2 opacity-30 grayscale pointer-events-none">
+                 <ShieldCheck className="w-3 h-3 text-emerald-500" />
+                 <span className="text-[8px] font-black uppercase tracking-[0.3em] text-white">System Sync in Progress</span>
+            </div>
+          </>
+        ) : (
+          <div className="py-20 text-center">
+            <Loader2 className="w-12 h-12 animate-spin text-cyan-500 mx-auto mb-6 shadow-[0_0_20px_rgba(6,182,212,0.1)]" />
+            <p className="text-cyan-500 font-black uppercase tracking-[0.4em] text-[10px]">Updating Carrier Nodes...</p>
+          </div>
+        )}
+      </motion.div>
     </div>
   );
 }
