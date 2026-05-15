@@ -1,25 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { 
-  Download, 
-  Loader2, 
-  LogOut, 
-  FileText,
-  FileType,
-  Clock,
-  Hash,
-  CheckCircle2,
-  ShieldCheck,
-  AlertCircle,
-  Database,
-  CreditCard,
-  Zap,
-  UserCircle,
-  Activity
+import {
+  Download, Loader2, LogOut, FileText, FileType, Clock,
+  CheckCircle2, ShieldCheck, AlertCircle, Database,
+  CreditCard, Zap, UserCircle, Activity, ArrowUpRight
 } from "lucide-react";
 import { supabase } from "../supabase";
 import { RealtimeChannel } from "@supabase/supabase-js";
-// FIXED: استبدال react-hot-toast بـ sonner
 import { toast } from "sonner";
 
 interface ArchiveItem {
@@ -27,12 +14,15 @@ interface ArchiveItem {
   created_at: string;
   created_at_beirut?: string;
   cv_pdf_url: string | null;
+  cv_file_path?: string | null;
+  submission_id?: string | null;
   target_job?: string;
-  user_name?: string; 
-  package_name?: string; 
+  user_name?: string;
+  package_name?: string;
+  region?: string;
   status?: string;
   agreed_to_terms?: boolean;
-  computedType?: 'cv' | 'cover' | 'analysis'; 
+  computedType?: 'cv' | 'cover' | 'analysis';
 }
 
 export default function MyAccount() {
@@ -41,6 +31,7 @@ export default function MyAccount() {
   const [archive, setArchive] = useState<ArchiveItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState("USER");
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     let channel: RealtimeChannel | null = null;
@@ -49,7 +40,6 @@ export default function MyAccount() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate("/login"); return; }
 
-      // تحسين أخذ الاسم (نقطة ذكرها كلوود بالتحسينات المقترحة)
       if (user.user_metadata?.full_name) {
         setUserName(user.user_metadata.full_name.split(' ')[0].toUpperCase());
       } else {
@@ -71,13 +61,12 @@ export default function MyAccount() {
 
       await fetchArchives();
 
-      channel = supabase.channel('my-account-updates').on('postgres_changes', 
-        { event: 'UPDATE', schema: 'public', table: 'cv_archive', filter: `user_id=eq.${user.id}` }, 
+      channel = supabase.channel('my-account-updates').on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'cv_archive', filter: `user_id=eq.${user.id}` },
         (payload) => {
           if (payload.new.cv_pdf_url) {
-            // FIXED: استخدام sonner toast
             toast.success("Document Ready!", {
-              description: "Great news! Your document is ready for download.",
+              description: "Your document is ready for download.",
               icon: '🚀',
             });
           }
@@ -94,10 +83,8 @@ export default function MyAccount() {
     return data.map(item => {
       const target = (item.target_job || "").toLowerCase();
       let type: 'cv' | 'cover' | 'analysis' = 'cv';
-      
       if (target.includes("analysis") || target.includes("review")) type = 'analysis';
       else if (target.includes("cover") || target.includes("cl")) type = 'cover';
-      
       return { ...item, computedType: type };
     });
   };
@@ -109,9 +96,77 @@ export default function MyAccount() {
 
   const getDocDetails = (item: ArchiveItem) => {
     const displayName = item.user_name ? item.user_name.toUpperCase() : userName;
-    if (item.computedType === 'analysis') return { name: `ATS ANALYSIS - ${displayName}`, icon: <AlertCircle className="w-4 h-4 text-orange-400" />, color: "bg-orange-500/10 border-orange-500/20" };
-    if (item.computedType === 'cover') return { name: `COVER LETTER - ${displayName}`, icon: <FileType className="w-4 h-4 text-fuchsia-400" />, color: "bg-fuchsia-500/10 border-fuchsia-500/20" };
-    return { name: `PROFESSIONAL CV - ${displayName}`, icon: <FileText className="w-4 h-4 text-cyan-400" />, color: "bg-cyan-500/10 border-cyan-500/20" };
+    if (item.computedType === 'analysis') return { name: `ATS ANALYSIS — ${displayName}`, icon: <AlertCircle className="w-4 h-4 text-orange-400" />, color: "bg-orange-500/10 border-orange-500/20" };
+    if (item.computedType === 'cover') return { name: `COVER LETTER — ${displayName}`, icon: <FileType className="w-4 h-4 text-fuchsia-400" />, color: "bg-fuchsia-500/10 border-fuchsia-500/20" };
+    return { name: `PROFESSIONAL CV — ${displayName}`, icon: <FileText className="w-4 h-4 text-cyan-400" />, color: "bg-cyan-500/10 border-cyan-500/20" };
+  };
+
+  // ── تحميل من Supabase أولاً، وإذا ما اشتغل يرجع لـ Google Drive ──
+  const handleDownload = async (item: ArchiveItem) => {
+    setDownloadingId(item.id);
+    try {
+      if (item.cv_file_path) {
+        const { data, error } = await supabase.storage
+          .from('cv-files-download')
+          .createSignedUrl(item.cv_file_path, 300);
+
+        if (!error && data?.signedUrl) {
+          window.open(data.signedUrl, '_blank');
+          return;
+        }
+      }
+
+      // Fallback — Google Drive export as PDF
+      if (item.cv_pdf_url) {
+        const docId = item.cv_pdf_url.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1];
+        if (docId) {
+          window.open(
+            `https://docs.google.com/document/d/${docId}/export?format=pdf`,
+            '_blank'
+          );
+          return;
+        }
+        window.open(item.cv_pdf_url, '_blank');
+      }
+    } catch {
+      toast.error("Download failed. Please try again.");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  // ── أزرار الترقية حسب الخطة ──
+  const getUpgradeButtons = (item: ArchiveItem) => {
+    const plan = (item.package_name || 'free').toLowerCase();
+    const buttons: { label: string; color: string; target: string }[] = [];
+
+    if (plan === 'free') {
+      buttons.push({ label: 'Upgrade Premium', color: 'cyan',    target: 'premium'  });
+      buttons.push({ label: 'Gold Plan',        color: 'fuchsia', target: 'gold'     });
+      buttons.push({ label: 'Analyze CV',       color: 'teal',   target: 'analysis' });
+    } else if (plan === 'premium') {
+      buttons.push({ label: 'Gold Plan',  color: 'fuchsia', target: 'gold'     });
+      buttons.push({ label: 'Analyze CV', color: 'teal',    target: 'analysis' });
+    } else if (plan === 'gold') {
+      buttons.push({ label: 'Analyze CV', color: 'teal', target: 'analysis' });
+    }
+
+    return buttons;
+  };
+
+  const handleUpgrade = (item: ArchiveItem, target: string) => {
+    if (target === 'analysis') {
+      navigate('/analyse');
+      return;
+    }
+    // PlansPage بتستلم الـ submission_id من الـ URL وبتكمّل باقي العملية
+    navigate(`/plans?id=${item.submission_id || ''}`);
+  };
+
+  const colorMap: Record<string, string> = {
+    cyan:    'border-cyan-500/30 text-cyan-400 hover:bg-cyan-500 hover:text-white',
+    fuchsia: 'border-fuchsia-500/30 text-fuchsia-400 hover:bg-fuchsia-500 hover:text-white',
+    teal:    'border-teal-500/30 text-teal-400 hover:bg-teal-500 hover:text-white',
   };
 
   const handleLogout = async () => {
@@ -121,25 +176,24 @@ export default function MyAccount() {
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-[#050B14]">
-      <Loader2 className="animate-spin text-cyan-500 w-10 h-10"/>
+      <Loader2 className="animate-spin text-cyan-500 w-10 h-10" />
     </div>
   );
 
   return (
     <div className="min-h-screen bg-[#050B14] text-slate-300 font-sans flex flex-col md:flex-row relative overflow-hidden">
-      {/* FIXED: شلنا الـ Toaster من هون لانو صار بملف App.tsx */}
-      
       <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-cyan-600/5 rounded-full blur-[120px] pointer-events-none" />
 
-      <aside className="w-full md:w-72 bg-[#0A1324]/60 backdrop-blur-2xl border-r border-white/5 flex-shrink-0 z-20">
+      {/* ── Sidebar ── */}
+      <aside className="w-full md:w-72 bg-[#0A1324]/60 backdrop-blur-2xl border-r border-white/5 flex-shrink-0 z-20 flex flex-col">
         <div className="p-8 border-b border-white/5">
-            <div className="flex items-center gap-3 mb-2">
-               <Database className="w-5 h-5 text-cyan-500" />
-               <span className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-500">Data Node</span>
-            </div>
-            <h1 className="text-2xl font-black text-white tracking-tighter uppercase">My Account</h1>
+          <div className="flex items-center gap-3 mb-2">
+            <Database className="w-5 h-5 text-cyan-500" />
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-500">Data Node</span>
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tighter uppercase">My Account</h1>
         </div>
-        
+
         <nav className="p-6 space-y-3">
           <button onClick={() => setActiveTab('downloads')} className={`w-full flex items-center gap-3 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeTab === 'downloads' ? "bg-cyan-600 text-white shadow-lg shadow-cyan-900/20" : "text-slate-500 hover:bg-white/5 hover:text-white"}`}>
             <Download className="w-4 h-4" /> Submissions
@@ -153,95 +207,153 @@ export default function MyAccount() {
         </nav>
 
         <div className="mt-auto p-6 border-t border-white/5">
-           <button onClick={handleLogout} className="w-full flex items-center gap-3 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-red-500 hover:bg-red-500/10 transition-all">
-             <LogOut className="w-4 h-4" /> Terminate Session
-           </button>
+          <button onClick={handleLogout} className="w-full flex items-center gap-3 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest text-red-500 hover:bg-red-500/10 transition-all">
+            <LogOut className="w-4 h-4" /> Terminate Session
+          </button>
         </div>
       </aside>
 
+      {/* ── Main ── */}
       <main className="flex-1 p-6 md:p-16 relative z-10 overflow-y-auto">
-        <div className="max-w-6xl mx-auto">
-          
+        <div className="max-w-7xl mx-auto">
+
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-6">
             <div>
               <div className="flex items-center gap-2 text-cyan-500 mb-2 font-black text-[10px] uppercase tracking-[0.3em]">
                 <Activity className="w-4 h-4 animate-pulse" /> Live Archive Status
               </div>
-              <h2 className="text-3xl lg:text-4xl font-black text-white uppercase tracking-tighter">Your Services <span className="text-cyan-400">Tracking</span></h2>
+              <h2 className="text-3xl lg:text-4xl font-black text-white uppercase tracking-tighter">
+                Your Services <span className="text-cyan-400">Tracking</span>
+              </h2>
             </div>
             <div className="flex items-center gap-4 bg-white/5 p-4 rounded-2xl border border-white/5">
-               <UserCircle className="w-10 h-10 text-slate-500" />
-               <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Entity</span>
-                  <span className="text-sm font-black text-white">{userName}</span>
-               </div>
+              <UserCircle className="w-10 h-10 text-slate-500" />
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Entity</span>
+                <span className="text-sm font-black text-white">{userName}</span>
+              </div>
             </div>
           </div>
 
+          {/* ── Table ── */}
           <div className="bg-[#0A1324]/40 backdrop-blur-xl rounded-[2.5rem] shadow-2xl border border-white/5 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-white/5 text-slate-500 text-[10px] uppercase tracking-[0.2em] font-black border-b border-white/5">
-                    <th className="px-8 py-6 tracking-[0.3em]">Timestamp</th>
-                    <th className="px-8 py-6 tracking-[0.3em]">Protocol Details</th>
-                    <th className="px-8 py-6 tracking-[0.3em]">Trace ID</th>
-                    <th className="px-8 py-6 text-center tracking-[0.3em]">Status</th>
-                    <th className="px-8 py-6 text-right tracking-[0.3em]">Data Access</th>
+                    <th className="px-6 py-5">Date</th>
+                    <th className="px-6 py-5">Document</th>
+                    <th className="px-6 py-5">Submission ID</th>
+                    <th className="px-6 py-5">Plan</th>
+                    <th className="px-6 py-5 text-center">Status</th>
+                    <th className="px-6 py-5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {archive.length === 0 ? (
-                    <tr><td colSpan={5} className="p-20 text-center text-slate-600 font-bold uppercase tracking-widest text-xs italic">No records detected in your encrypted archive.</td></tr>
+                    <tr>
+                      <td colSpan={6} className="p-20 text-center text-slate-600 font-bold uppercase tracking-widest text-xs italic">
+                        No records detected in your encrypted archive.
+                      </td>
+                    </tr>
                   ) : (
                     archive.map((item) => {
                       const docInfo = getDocDetails(item);
+                      const upgradeButtons = getUpgradeButtons(item);
+                      const isDownloading = downloadingId === item.id;
+
                       return (
                         <tr key={item.id} className="hover:bg-white/5 transition-all duration-300">
-                          <td className="px-8 py-6">
-                            <div className="flex flex-col">
+
+                          {/* Date */}
+                          <td className="px-6 py-5">
+                            <div className="flex flex-col gap-1">
                               <span className="text-sm font-black text-white">{formatDate(item.created_at)}</span>
                               {item.agreed_to_terms && (
-                                <span className="flex items-center gap-1 text-[9px] text-emerald-500 font-black mt-1 uppercase tracking-widest">
-                                  <ShieldCheck className="w-3 h-3" /> Encrypted Consent
+                                <span className="flex items-center gap-1 text-[9px] text-emerald-500 font-black uppercase tracking-widest">
+                                  <ShieldCheck className="w-3 h-3" /> Verified
                                 </span>
                               )}
                             </div>
                           </td>
-                          <td className="px-8 py-6">
-                            <div className="flex items-center gap-4">
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${docInfo.color} shadow-lg`}>
+
+                          {/* Document */}
+                          <td className="px-6 py-5">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${docInfo.color}`}>
                                 {docInfo.icon}
                               </div>
-                              <div className="flex flex-col">
-                                <span className="text-sm font-black text-white uppercase tracking-tight">{docInfo.name}</span>
-                                <span className="text-[9px] font-black text-cyan-500 uppercase tracking-[0.2em]">{item.package_name || "Basic Node"}</span>
-                              </div>
+                              <span className="text-sm font-black text-white uppercase tracking-tight">{docInfo.name}</span>
                             </div>
                           </td>
-                          <td className="px-8 py-6">
-                            <span className="font-mono text-[11px] text-slate-500 uppercase tracking-widest flex items-center gap-1">
-                               {item.id.slice(0, 8)}
+
+                          {/* Submission ID */}
+                          <td className="px-6 py-5">
+                            <span className="font-mono text-[11px] text-slate-400 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
+                              {item.submission_id || item.id.slice(0, 8).toUpperCase()}
                             </span>
                           </td>
-                          <td className="px-8 py-6 text-center">
-                            {item.cv_pdf_url ? (
-                              <span className="px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 inline-flex items-center gap-2">
-                                <CheckCircle2 className="w-3 h-3"/> Authorized
+
+                          {/* Plan */}
+                          <td className="px-6 py-5">
+                            <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${
+                              (item.package_name || '').toLowerCase() === 'gold'
+                                ? 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20'
+                                : (item.package_name || '').toLowerCase() === 'premium'
+                                ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                                : 'bg-white/5 text-slate-500 border-white/10'
+                            }`}>
+                              {item.package_name || 'Free'}
+                            </span>
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-6 py-5 text-center">
+                            {item.cv_pdf_url || item.cv_file_path ? (
+                              <span className="px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 inline-flex items-center gap-1.5">
+                                <CheckCircle2 className="w-3 h-3" /> Ready
                               </span>
                             ) : (
-                              <span className="px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-500 border border-amber-500/20 animate-pulse inline-flex items-center gap-2">
-                                <Clock className="w-3 h-3"/> Processing
+                              <span className="px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-500 border border-amber-500/20 animate-pulse inline-flex items-center gap-1.5">
+                                <Clock className="w-3 h-3" /> Processing
                               </span>
                             )}
                           </td>
-                          <td className="px-8 py-6 text-right">
-                            {item.cv_pdf_url && (
-                              <a href={item.cv_pdf_url} target="_blank" rel="noreferrer" className="bg-cyan-600/10 text-cyan-400 border border-cyan-500/20 px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-cyan-600 hover:text-white transition-all inline-flex items-center gap-2 group shadow-lg shadow-cyan-900/10">
-                                Download <Download className="w-3 h-3 group-hover:translate-y-0.5 transition-transform"/>
-                              </a>
-                            )}
+
+                          {/* Actions */}
+                          <td className="px-6 py-5">
+                            <div className="flex items-center justify-end gap-2 flex-wrap">
+
+                              {/* Download */}
+                              {(item.cv_pdf_url || item.cv_file_path) && (
+                                <button
+                                  onClick={() => handleDownload(item)}
+                                  disabled={isDownloading}
+                                  className="bg-cyan-600/10 text-cyan-400 border border-cyan-500/20 px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-cyan-600 hover:text-white transition-all inline-flex items-center gap-2 group shadow-lg"
+                                >
+                                  {isDownloading
+                                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                                    : <Download className="w-3 h-3 group-hover:translate-y-0.5 transition-transform" />
+                                  }
+                                  Download
+                                </button>
+                              )}
+
+                              {/* Upgrade Buttons */}
+                              {upgradeButtons.map((btn) => (
+                                <button
+                                  key={btn.target}
+                                  onClick={() => handleUpgrade(item, btn.target)}
+                                  className={`border px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all inline-flex items-center gap-1.5 ${colorMap[btn.color]}`}
+                                >
+                                  <ArrowUpRight className="w-3 h-3" />
+                                  {btn.label}
+                                </button>
+                              ))}
+
+                            </div>
                           </td>
+
                         </tr>
                       );
                     })
@@ -250,6 +362,7 @@ export default function MyAccount() {
               </table>
             </div>
           </div>
+
         </div>
       </main>
     </div>
