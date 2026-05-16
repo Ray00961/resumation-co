@@ -1,3 +1,71 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    background-color: #1F2B2D;
+    color: #E5F9F8;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: "Plus Jakarta Sans", Inter, system-ui, sans-serif;
+    background-color: #1F2B2D;
+    color: #E5F9F8;
+  }
+}
+
+@layer utilities {
+  /* ── Glassmorphism surfaces ── */
+  .cyber-glass {
+    background: rgba(35, 113, 123, 0.12);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(18, 178, 193, 0.14);
+  }
+
+  .cyber-glass-md {
+    background: rgba(35, 113, 123, 0.18);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(18, 178, 193, 0.2);
+  }
+
+  .cyber-glass-strong {
+    background: rgba(35, 113, 123, 0.28);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(18, 178, 193, 0.25);
+  }
+
+  /* ── Glow shadows ── */
+  .cyber-glow {
+    box-shadow: 0 0 20px rgba(13, 138, 158, 0.2);
+  }
+
+  .cyber-glow-lg {
+    box-shadow: 0 0 40px rgba(13, 138, 158, 0.3);
+  }
+
+  .cyber-glow-cyan {
+    box-shadow: 0 0 20px rgba(18, 178, 193, 0.25);
+  }
+
+  /* ── Arabic text optimization ── */
+  .font-arabic {
+    font-family: "IBM Plex Sans Arabic", Cairo, system-ui, sans-serif;
+    line-height: 1.85;
+    letter-spacing: 0;
+  }
+
+  /* ── Scrollbar ── */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}

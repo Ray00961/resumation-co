@@ -37,16 +37,16 @@ import AnalysisLinks from "./AnalysisLinks";
 // FIXED: إضافة مكون بسيط لصفحة 404 (فيك تغير تصميمه لاحقاً)
 const NotFound = () => (
   <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
-    <h1 className="text-6xl font-black text-cyan-500 mb-4">404</h1>
-    <p className="text-xl text-slate-600 mb-8">عذراً، هذه الصفحة غير موجودة.</p>
-    <a href="/" className="bg-cyan-600 text-white px-6 py-2 rounded-lg font-bold">العودة للرئيسية</a>
+    <h1 className="text-6xl font-black text-cyber-cyan mb-4">404</h1>
+    <p className="text-xl text-cyber-dim mb-8">عذراً، هذه الصفحة غير موجودة.</p>
+    <a href="/" className="bg-cyber-teal text-white px-6 py-2 rounded-lg font-bold hover:bg-cyber-cyan transition-colors">العودة للرئيسية</a>
   </div>
 );
 
 export default function App() {
   return (
     <Router>
-      <div className="flex flex-col min-h-screen bg-slate-50">
+      <div className="flex flex-col min-h-screen bg-cyber-bg">
         
         {/* تشغيل المراقب في الخلفية */}
         <NotificationListener />

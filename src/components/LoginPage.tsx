@@ -1,30 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2, ShieldCheck, Cpu } from 'lucide-react';
-import { useNavigate, Link } from 'react-router-dom';
+import { ShieldCheck, Cpu } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { supabase } from '../supabase';
 
 const LoginPage = () => {
-  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  // --- 1. المزامنة مع Make.com عند تسجيل الدخول ---
   useEffect(() => {
     const syncOnLogin = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      
+
       if (session?.user) {
-        // سحب بيانات الموقع من localStorage إذا وجدت
         const pendingData = localStorage.getItem('pending_user_data');
         const parsed = pendingData ? JSON.parse(pendingData) : {};
-        
-        // استخدام الرابط من Environment Variables
+
         const MAKE_WEBHOOK_URL = import.meta.env.VITE_MAKE_LOGIN_SYNC;
 
         if (MAKE_WEBHOOK_URL) {
           try {
-            // إرسال البيانات إجبارياً لتفعيل Webhook بـ Make
             await fetch(MAKE_WEBHOOK_URL, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -38,16 +33,13 @@ const LoginPage = () => {
                 timestamp: new Date().toISOString()
               })
             });
-            
-            // تنظيف البيانات بعد المزامنة
+
             if (pendingData) localStorage.removeItem('pending_user_data');
-            console.log("Login sync dispatched successfully.");
           } catch (err) {
             console.error("Sync to Make.com failed:", err);
           }
         }
-        
-        // التوجه للوحة التحكم
+
         navigate('/dashboard');
       }
     };
@@ -55,13 +47,12 @@ const LoginPage = () => {
     syncOnLogin();
   }, [navigate]);
 
-  // --- 2. تسجيل الدخول عبر جوجل ---
   const handleGoogleLogin = async () => {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/login` 
+          redirectTo: `${window.location.origin}/login`
         }
       });
       if (error) throw error;
@@ -71,43 +62,42 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#050B14] px-4 py-12 relative overflow-hidden font-sans">
-      
-      {/* Background Cyber Ambience */}
-      <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-cyan-600/5 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-[50vw] h-[50vw] bg-blue-600/5 rounded-full blur-[120px] pointer-events-none" />
+    <div className="min-h-screen flex items-center justify-center bg-cyber-bg px-4 py-12 relative overflow-hidden font-sans">
+
+      <div className="absolute top-0 right-0 w-[50vw] h-[50vw] bg-cyber-teal/5 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[50vw] h-[50vw] bg-cyber-teal/5 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEgMWgzOHYzOEgxVjF6IiBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIHN0cm9rZT0icmdiYSgyNTUsIDI1NSwgMjU1LCAwLjAxKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9zdmc+')] opacity-40 pointer-events-none" />
 
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
-        className="max-w-md w-full space-y-8 bg-[#0A1324]/60 backdrop-blur-2xl p-8 lg:p-12 rounded-[2.5rem] shadow-2xl border border-white/5 z-10 relative overflow-hidden text-center"
+        className="max-w-md w-full space-y-8 bg-[rgba(35,113,123,0.12)] backdrop-blur-2xl p-8 lg:p-12 rounded-[2.5rem] shadow-2xl border border-cyber-teal/20 z-10 relative overflow-hidden text-center"
       >
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/2 h-1 bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/2 h-1 bg-gradient-to-r from-transparent via-cyber-cyan/50 to-transparent" />
 
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 mb-6 shadow-[0_0_20px_rgba(6,182,212,0.1)]">
-            <Cpu className="w-8 h-8 text-cyan-400" strokeWidth={1.5} />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-cyber-teal/10 border border-cyber-teal/20 mb-6 shadow-[0_0_20px_rgba(13,138,158,0.1)]">
+            <Cpu className="w-8 h-8 text-cyber-cyan" strokeWidth={1.5} />
           </div>
           <h2 className="text-3xl font-black text-white tracking-tight mb-2 uppercase">
-            Resumation<span className="text-cyan-400">.co</span>
+            Resumation<span className="text-cyber-cyan">.co</span>
           </h2>
-          <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em]">AI Secure Portal</p>
+          <p className="text-cyber-muted text-[10px] font-black uppercase tracking-[0.3em]">AI Secure Portal</p>
         </div>
 
         <div className="space-y-6 pt-4">
           <div className="mb-8">
             <h3 className="text-xl font-bold text-white mb-2">Welcome Back / مرحباً بك</h3>
-            <p className="text-slate-400 text-sm">Access your AI professional workspace via Google.</p>
+            <p className="text-cyber-muted text-sm">Access your AI professional workspace via Google.</p>
           </div>
 
           <button
             type="button"
             onClick={handleGoogleLogin}
-            className="w-full flex items-center justify-center gap-4 bg-white/5 border border-white/10 rounded-2xl py-5 px-4 text-white font-bold hover:bg-white/10 hover:border-cyan-500/30 transition-all duration-300 shadow-xl group relative overflow-hidden"
+            className="w-full flex items-center justify-center gap-4 bg-white/5 border border-white/10 rounded-2xl py-5 px-4 text-white font-bold hover:bg-white/10 hover:border-cyber-teal/30 transition-all duration-300 shadow-xl group relative overflow-hidden"
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            <div className="absolute inset-0 bg-gradient-to-r from-cyber-teal/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
             <svg className="w-5 h-5 relative z-10" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
@@ -118,11 +108,11 @@ const LoginPage = () => {
           </button>
 
           <div className="flex flex-col items-center gap-6 mt-12 pt-8 border-t border-white/5">
-            <div className="flex items-center gap-2 px-4 py-2 bg-cyan-500/5 rounded-full border border-cyan-500/10 shadow-[0_0_15px_rgba(6,182,212,0.05)]">
-              <ShieldCheck className="w-4 h-4 text-cyan-500" />
-              <span className="text-[10px] font-black text-cyan-500 uppercase tracking-widest">Enterprise Security Verified</span>
+            <div className="flex items-center gap-2 px-4 py-2 bg-cyber-teal/5 rounded-full border border-cyber-teal/10 shadow-[0_0_15px_rgba(13,138,158,0.05)]">
+              <ShieldCheck className="w-4 h-4 text-cyber-cyan" />
+              <span className="text-[10px] font-black text-cyber-cyan uppercase tracking-widest">Enterprise Security Verified</span>
             </div>
-            <p className="text-[10px] text-slate-600 font-medium uppercase tracking-widest">
+            <p className="text-[10px] text-cyber-dim font-medium uppercase tracking-widest">
               Resumation™ Industrial Infrastructure
             </p>
           </div>
