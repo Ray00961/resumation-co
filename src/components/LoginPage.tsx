@@ -19,6 +19,8 @@ const LoginPage = () => {
   const [usernameStatus, setUsernameStatus] = useState<"idle"|"checking"|"available"|"taken"|"invalid">("idle");
   const [saving,     setSaving]     = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [debugLog,   setDebugLog]   = useState<string[]>([]);
+  const log = (msg: string) => setDebugLog(prev => [...prev, `${new Date().toLocaleTimeString()} — ${msg}`]);
 
   // Prevent handlePostLogin from running twice (INITIAL_SESSION + SIGNED_IN both fire)
   const handledRef    = useRef(false);
@@ -76,9 +78,9 @@ const LoginPage = () => {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        toast.info(`🔑 Event: ${event} | User: ${session?.user?.email ?? "none"}`);
+        log(`EVENT: ${event} | ${session?.user?.email ?? "no user"}`);
         if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
-          if (handledRef.current) { toast.info("⏭ Already handled"); return; }
+          if (handledRef.current) { log("SKIP: already handled"); return; }
           handledRef.current = true;
           await handlePostLogin(session.user.id, session.user);
         }
@@ -131,13 +133,13 @@ const LoginPage = () => {
         .eq("id", uid)
         .maybeSingle();
 
-      toast.info(`📦 DB result: username=${userData?.username ?? "NULL"} | error=${error?.message ?? "none"}`);
+      log(`DB: username="${userData?.username ?? "NULL"}" | err="${error?.message ?? "none"}"`);
 
       if (error) throw error;
 
       if (userData?.username) {
-        toast.success("✅ Has username → going to dashboard");
-        setTimeout(() => window.location.replace("/dashboard"), 1500);
+        log("→ navigating to /dashboard");
+        setTimeout(() => window.location.replace("/dashboard"), 2000);
       } else {
         const fullName: string = user.user_metadata?.full_name || "";
         const parts = fullName.trim().split(" ");
@@ -348,6 +350,13 @@ const LoginPage = () => {
         </div>
         <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#E0C58F]/20 to-transparent" />
       </div>
+
+      {/* DEBUG PANEL — مؤقت للتشخيص */}
+      {debugLog.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 text-green-400 font-mono text-[11px] p-3 max-h-48 overflow-y-auto">
+          {debugLog.map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+      )}
     </div>
   );
 };
