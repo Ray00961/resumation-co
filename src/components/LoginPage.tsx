@@ -76,8 +76,9 @@ const LoginPage = () => {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        toast.info(`🔑 Event: ${event} | User: ${session?.user?.email ?? "none"}`);
         if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
-          if (handledRef.current) return; // prevent double-invoke
+          if (handledRef.current) { toast.info("⏭ Already handled"); return; }
           handledRef.current = true;
           await handlePostLogin(session.user.id, session.user);
         }
@@ -130,10 +131,13 @@ const LoginPage = () => {
         .eq("id", uid)
         .maybeSingle();
 
+      toast.info(`📦 DB result: username=${userData?.username ?? "NULL"} | error=${error?.message ?? "none"}`);
+
       if (error) throw error;
 
       if (userData?.username) {
-        window.location.replace("/dashboard");
+        toast.success("✅ Has username → going to dashboard");
+        setTimeout(() => window.location.replace("/dashboard"), 1500);
       } else {
         const fullName: string = user.user_metadata?.full_name || "";
         const parts = fullName.trim().split(" ");
