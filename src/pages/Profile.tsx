@@ -6,7 +6,7 @@ import {
   Loader2, Edit3, Save, X, MapPin, Globe, Briefcase,
   Zap, Phone, Mail, Lock, Eye, Plus, Sparkles,
   ExternalLink, Copy, CheckCheck, Lightbulb, RefreshCw,
-  Camera, GraduationCap, UserCog, Move,
+  Camera, GraduationCap, UserCog, Move, FileText, BrainCircuit,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -60,6 +60,9 @@ export default function Profile() {
   const [saving, setSaving]   = useState(false);
   const [copied, setCopied]   = useState(false);
   const [aiLoading, setAiLoading] = useState<"summary"|"jobs"|null>(null);
+
+  const [cvCount,       setCvCount]       = useState<number | null>(null);
+  const [analysisCount, setAnalysisCount] = useState<number | null>(null);
 
   const [newSkill, setNewSkill] = useState("");
   const [newJob,   setNewJob]   = useState("");
@@ -149,6 +152,9 @@ export default function Profile() {
       myAccount:"My Account",
       uploadFail:"Upload failed",
       photoUpdated:"Photo updated!",
+      statsTitle:"My Activity",
+      cvCount:"CVs Generated",
+      analysisCount:"Analyses Done",
     },
     ar: {
       editBtn:"تعديل الملف", saveBtn:"حفظ التغييرات", cancelBtn:"إلغاء",
@@ -177,6 +183,9 @@ export default function Profile() {
       myAccount:"حسابي",
       uploadFail:"فشل الرفع",
       photoUpdated:"تم تحديث الصورة!",
+      statsTitle:"نشاطي",
+      cvCount:"سيرة ذاتية مُنشأة",
+      analysisCount:"تحليل منجز",
     },
   }[lang];
 
@@ -238,6 +247,17 @@ export default function Profile() {
           cover_position:  p?.cover_position  ?? "50% 50%",
           avatar_position: p?.avatar_position ?? "50% 50%",
         });
+      // جيب الإحصائيات بشكل مستقل
+      supabase.from("cv_archive")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", session.user.id)
+        .then(({ count }) => setCvCount(count ?? 0));
+
+      supabase.from("cv_analysis_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", session.user.id)
+        .then(({ count }) => setAnalysisCount(count ?? 0));
+
       } catch (err) {
         console.error("Profile fetch error:", err);
       } finally {
@@ -820,6 +840,23 @@ export default function Profile() {
             )}
           </div>
         </Card>
+
+        {/* ── STATS (للمستخدم نفسه بس) ── */}
+        <div className="grid grid-cols-2 gap-4">
+          {[
+            { icon: FileText,     value: cvCount,       label: t.cvCount,       color: "#12B2C1" },
+            { icon: BrainCircuit, value: analysisCount, label: t.analysisCount, color: "#E0C58F" },
+          ].map(({ icon: Icon, value, label, color }) => (
+            <div key={label} className="rounded-2xl p-5 text-center"
+              style={{ background:"rgba(13,17,23,0.85)", backdropFilter:"blur(24px)", border:"1px solid rgba(60,80,125,0.15)" }}>
+              <Icon className="w-5 h-5 mx-auto mb-2" style={{ color }} />
+              <div className="text-2xl font-black font-mono mb-1" style={{ color }}>
+                {value === null ? "—" : value}
+              </div>
+              <div className="text-[10px] text-[#A8B4CC]">{label}</div>
+            </div>
+          ))}
+        </div>
 
         {/* ── EDUCATION ── */}
         <Card title={t.eduTitle}>
