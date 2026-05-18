@@ -21,7 +21,8 @@ const LoginPage = () => {
   const [processing, setProcessing] = useState(false);
 
   // Prevent handlePostLogin from running twice (INITIAL_SESSION + SIGNED_IN both fire)
-  const handledRef = useRef(false);
+  const handledRef    = useRef(false);
+  const processingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const t = {
     en: {
@@ -96,40 +97,57 @@ const LoginPage = () => {
     setProcessing(true);
     setUserId(uid);
 
-    // Sync to Make.com — fire and forget, never block login
-    const MAKE_URL = import.meta.env.VITE_MAKE_LOGIN_SYNC;
-    if (MAKE_URL) {
-      const pending = localStorage.getItem("pending_user_data");
-      const parsed  = pending ? JSON.parse(pending) : {};
-      fetch(MAKE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: uid, email: user.email,
-          region: parsed.region || "LB", language: parsed.language || lang,
-          lat: parsed.lat || 0, lon: parsed.lon || 0,
-          timestamp: new Date().toISOString(),
-        }),
-      }).catch(() => {});
-      if (pending) localStorage.removeItem("pending_user_data");
-    }
-
-    // Check if user already completed setup
-    const { data: userData } = await supabase
-      .from("users")
-      .select("username, first_name")
-      .eq("id", uid)
-      .maybeSingle();
-
-    if (userData?.username) {
-      navigate("/dashboard");
-    } else {
-      const fullName: string = user.user_metadata?.full_name || "";
-      const parts = fullName.trim().split(" ");
-      setFirstName(parts[0] || "");
-      setLastName(parts.slice(1).join(" ") || "");
+    // timeout — إذا عالق أكتر من 15 ثانية بيرجع للبداية
+    processingRef.current = setTimeout(() => {
+      handledRef.current = false;
       setProcessing(false);
-      setStep("setup");
+      toast.error(isRtl ? "انتهت المهلة، حاول مجدداً" : "Timed out. Please try again.");
+    }, 15000);
+
+    try {
+      // Sync to Make.com — fire and forget
+      const MAKE_URL = import.meta.env.VITE_MAKE_LOGIN_SYNC;
+      if (MAKE_URL) {
+        const pending = localStorage.getItem("pending_user_data");
+        const parsed  = pending ? JSON.parse(pending) : {};
+        fetch(MAKE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: uid, email: user.email,
+            region: parsed.region || "LB", language: parsed.language || lang,
+            lat: parsed.lat || 0, lon: parsed.lon || 0,
+            timestamp: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+        if (pending) localStorage.removeItem("pending_user_data");
+      }
+
+      // تحقق إذا المستخدم أكمل الإعداد
+      const { data: userData, error } = await supabase
+        .from("users")
+        .select("username, first_name")
+        .eq("id", uid)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (userData?.username) {
+        navigate("/dashboard");
+      } else {
+        const fullName: string = user.user_metadata?.full_name || "";
+        const parts = fullName.trim().split(" ");
+        setFirstName(parts[0] || "");
+        setLastName(parts.slice(1).join(" ") || "");
+        setProcessing(false);
+        setStep("setup");
+      }
+    } catch (err: any) {
+      handledRef.current = false;
+      setProcessing(false);
+      toast.error(isRtl ? "حدث خطأ، حاول مجدداً" : "Something went wrong. Please try again.");
+    } finally {
+      if (processingRef.current) clearTimeout(processingRef.current);
     }
   };
 
