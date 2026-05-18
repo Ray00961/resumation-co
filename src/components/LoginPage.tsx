@@ -133,7 +133,7 @@ const LoginPage = () => {
       if (error) throw error;
 
       if (userData?.username) {
-        navigate("/dashboard");
+        window.location.replace("/dashboard");
       } else {
         const fullName: string = user.user_metadata?.full_name || "";
         const parts = fullName.trim().split(" ");
