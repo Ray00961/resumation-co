@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Sparkles, MapPin, FileText, BrainCircuit,
+  Sparkles, MapPin,
   Loader2, AlertCircle, ExternalLink, Copy, CheckCheck,
   Globe, Zap
 } from "lucide-react";
@@ -47,8 +47,6 @@ export default function UserProfile() {
       joinedOn:     "Joined",
       region:       "Region",
       regions:      { EG: "Egypt 🇪🇬", LB: "Lebanon 🇱🇧" },
-      cvCount:      "CVs Generated",
-      analysisCount:"Analyses Done",
       copyLink:     "Copy Profile Link",
       copied:       "Copied!",
       buildWith:    "Build your own AI CV",
@@ -62,8 +60,6 @@ export default function UserProfile() {
       joinedOn:     "انضم في",
       region:       "المنطقة",
       regions:      { EG: "مصر 🇪🇬", LB: "لبنان 🇱🇧" },
-      cvCount:      "سيرة ذاتية مُنشأة",
-      analysisCount:"تحليل منجز",
       copyLink:     "نسخ رابط الملف",
       copied:       "تم النسخ!",
       buildWith:    "ابنِ سيرتك الذاتية بالذكاء الاصطناعي",
@@ -278,9 +274,6 @@ export default function UserProfile() {
           </div>
         </div>
 
-        {/* ── Stats Cards ── */}
-        <CvStats userId={profile!.id} t={t} isRtl={isRtl} />
-
         {/* ── CTA ── */}
         <div
           className="rounded-2xl p-6 mt-6 flex flex-col sm:flex-row items-center justify-between gap-4"
@@ -313,45 +306,3 @@ export default function UserProfile() {
   );
 }
 
-// ── CV + Analysis stats subcomponent ──
-function CvStats({ userId, t, isRtl }: { userId: string; t: any; isRtl: boolean }) {
-  const [cvCount,       setCvCount]       = useState<number | null>(null);
-  const [analysisCount, setAnalysisCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    // Use secure RPC — never exposes cv_archive or cv_analysis_requests directly
-    supabase
-      .rpc("get_public_profile_stats", { profile_user_id: userId })
-      .then(({ data }) => {
-        if (data) {
-          setCvCount(data.cv_count ?? 0);
-          setAnalysisCount(data.analysis_count ?? 0);
-        }
-      });
-  }, [userId]);
-
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      {[
-        { icon: FileText,     value: cvCount,       label: t.cvCount,       color: "#12B2C1" },
-        { icon: BrainCircuit, value: analysisCount, label: t.analysisCount, color: "#E0C58F" },
-      ].map(({ icon: Icon, value, label, color }) => (
-        <div
-          key={label}
-          className="rounded-2xl p-6 text-center"
-          style={{
-            background: "rgba(13,17,23,0.85)",
-            backdropFilter: "blur(24px)",
-            border: "1px solid rgba(60,80,125,0.15)",
-          }}
-        >
-          <Icon className="w-6 h-6 mx-auto mb-3" style={{ color }} />
-          <div className="text-2xl font-black font-mono mb-1" style={{ color }}>
-            {value === null ? "—" : value}
-          </div>
-          <div className="text-[11px] text-[#A8B4CC]">{label}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
