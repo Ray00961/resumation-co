@@ -131,6 +131,14 @@ export default function PlansPage() {
       return;
     }
 
+    // Get fresh JWT token for Authorization header
+    const { data: { session: paySession } } = await supabase.auth.getSession();
+    const accessToken = paySession?.access_token;
+    if (!accessToken) {
+      navigate("/login");
+      return;
+    }
+
     setLoading(plan);
     setPayError(null);
     const sid = submissionId || "NO_ID";
@@ -145,11 +153,16 @@ export default function PlansPage() {
       has_referral: hasReferral, coins: finalCoins(plan),
     };
 
+    const authHeaders = {
+      "Content-Type":  "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+    };
+
     try {
       if (isEgypt) {
         await fetch(EF_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders,
           body: JSON.stringify({ ...body, payment_method: "paymob" }),
         });
 
@@ -171,7 +184,7 @@ export default function PlansPage() {
       } else {
         const res    = await fetch(EF_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders,
           body: JSON.stringify({ ...body, payment_method: "whish" }),
         });
         const result = await res.json().catch(() => ({}));
@@ -200,9 +213,14 @@ export default function PlansPage() {
     if (!EF_URL) { navigate("/package-access"); return; }
     setLoading("free");
     try {
+      const { data: { session: freeSession } } = await supabase.auth.getSession();
+      const freeToken = freeSession?.access_token;
       await fetch(EF_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type":  "application/json",
+          ...(freeToken ? { "Authorization": `Bearer ${freeToken}` } : {}),
+        },
         body: JSON.stringify({
           user_id: userId,
           id: submissionId || userEmail, old_sub: oldSubmissionId || null,
