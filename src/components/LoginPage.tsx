@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ShieldCheck, Sparkles, AtSign, User, ChevronRight, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { ShieldCheck, Sparkles, AtSign, User, ChevronRight, Loader2, CheckCircle2, XCircle, Tag } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { supabase } from "../supabase";
 import { useLang } from "../context/LanguageContext";
 
 type Step = "login" | "setup";
+type PromoStatus = "idle" | "checking" | "valid" | "invalid";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -19,49 +20,95 @@ const LoginPage = () => {
   const [usernameStatus, setUsernameStatus] = useState<"idle"|"checking"|"available"|"taken"|"invalid">("idle");
   const [saving,     setSaving]     = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [debugLog,   setDebugLog]   = useState<string[]>([]);
-  const log = (msg: string) => setDebugLog(prev => [...prev, `${new Date().toLocaleTimeString()} — ${msg}`]);
+
+  // ── NEW: Referral code & Terms ──
+  const [promoCode,     setPromoCode]     = useState("");
+  const [promoStatus,   setPromoStatus]   = useState<PromoStatus>("idle");
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   // Prevent handlePostLogin from running twice (INITIAL_SESSION + SIGNED_IN both fire)
-  const handledRef    = useRef(false);
-  const processingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handledRef         = useRef(false);
+  const stepRef            = useRef<Step>("login");
+  const processingRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const promoDebounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usernameDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setStepSync = (s: Step) => { stepRef.current = s; setStep(s); };
 
   const t = {
     en: {
-      tagline: "AI Secure Portal",
-      welcome: "Welcome to Resumation.co",
-      sub: "Sign in with Google to access your AI-powered career workspace.",
-      loginBtn: "Continue with Google",
-      security: "Enterprise-Grade Security",
-      infra: "Resumation™ AI Infrastructure",
-      setupTitle: "Complete Your Profile",
-      setupSub: "Set up your account to get started. Your username is permanent.",
-      firstName: "First Name", lastName: "Last Name",
-      usernameLbl: "Username", usernamePh: "e.g. john_doe",
-      usernameHint: "3–20 chars · lowercase · letters, numbers, underscores only",
-      checking: "Checking...", available: "Available!", taken: "Already taken", invalid: "Invalid format",
-      saveBtn: "Create My Account", saving: "Saving...",
+      tagline:       "AI Secure Portal",
+      welcome:       "Welcome to Resumation.co",
+      sub:           "Sign in with Google to access your AI-powered career workspace.",
+      loginBtn:      "Continue with Google",
+      security:      "Enterprise-Grade Security",
+      infra:         "Resumation™ AI Infrastructure",
+      setupTitle:    "Complete Your Profile",
+      setupSub:      "Set up your account to get started. Your username is permanent.",
+      firstName:     "First Name",
+      lastName:      "Last Name",
+      usernameLbl:   "Username",
+      usernamePh:    "e.g. john_doe",
+      usernameHint:  "3–20 chars · lowercase · letters, numbers, underscores only",
+      checking:      "Checking...",
+      available:     "Available!",
+      taken:         "Already taken",
+      invalid:       "Invalid format",
+      saveBtn:       "Create My Account",
+      saving:        "Saving...",
+      // Referral code
+      promoLbl:      "Referral Code",
+      promoPh:       "e.g. RSM-A4F2B1",
+      promoHint:     "Optional — enter a friend's referral code",
+      promoChecking: "Verifying code...",
+      promoValid:    "Valid referral code! You're good to go.",
+      promoInvalid:  "Invalid or expired code",
+      // Terms
+      termsPrefix:   "I agree to the",
+      termsLink:     "Terms of Service",
+      termsAnd:      "and",
+      privacyLink:   "Privacy Policy",
+      termsRequired: "You must agree to the Terms of Service to continue",
     },
     ar: {
-      tagline: "بوابة الذكاء الاصطناعي الآمنة",
-      welcome: "أهلاً بك في Resumation.co",
-      sub: "سجّل دخولك عبر Google للوصول إلى مساحة عملك المدعومة بالذكاء الاصطناعي.",
-      loginBtn: "المتابعة عبر Google",
-      security: "أمان على مستوى المؤسسات",
-      infra: "البنية التحتية الذكية لـ Resumation™",
-      setupTitle: "أكمل ملفك الشخصي",
-      setupSub: "أنشئ حسابك للبدء. اسم المستخدم دائم ويُستخدم في ملفك الشخصي العام.",
-      firstName: "الاسم الأول", lastName: "اسم العائلة",
-      usernameLbl: "اسم المستخدم", usernamePh: "مثال: ahmad_ali",
-      usernameHint: "3–20 حرفاً · أحرف إنجليزية صغيرة وأرقام وشرطة سفلية فقط",
-      checking: "جاري الفحص...", available: "متاح!", taken: "مستخدم مسبقاً", invalid: "صيغة غير صحيحة",
-      saveBtn: "إنشاء حسابي", saving: "جاري الحفظ...",
+      tagline:       "بوابة الذكاء الاصطناعي الآمنة",
+      welcome:       "أهلاً بك في Resumation.co",
+      sub:           "سجّل دخولك عبر Google للوصول إلى مساحة عملك المدعومة بالذكاء الاصطناعي.",
+      loginBtn:      "المتابعة عبر Google",
+      security:      "أمان على مستوى المؤسسات",
+      infra:         "البنية التحتية الذكية لـ Resumation™",
+      setupTitle:    "أكمل ملفك الشخصي",
+      setupSub:      "أنشئ حسابك للبدء. اسم المستخدم دائم ويُستخدم في ملفك الشخصي العام.",
+      firstName:     "الاسم الأول",
+      lastName:      "اسم العائلة",
+      usernameLbl:   "اسم المستخدم",
+      usernamePh:    "مثال: ahmad_ali",
+      usernameHint:  "3–20 حرفاً · أحرف إنجليزية صغيرة وأرقام وشرطة سفلية فقط",
+      checking:      "جاري الفحص...",
+      available:     "متاح!",
+      taken:         "مستخدم مسبقاً",
+      invalid:       "صيغة غير صحيحة",
+      saveBtn:       "إنشاء حسابي",
+      saving:        "جاري الحفظ...",
+      // Referral code
+      promoLbl:      "كود الإحالة",
+      promoPh:       "مثال: RSM-A4F2B1",
+      promoHint:     "اختياري — أدخل كود دعوة من صديق",
+      promoChecking: "جاري التحقق من الكود...",
+      promoValid:    "كود إحالة صحيح! يمكنك المتابعة.",
+      promoInvalid:  "كود غير صحيح أو منتهي الصلاحية",
+      // Terms
+      termsPrefix:   "أوافق على",
+      termsLink:     "شروط الاستخدام",
+      termsAnd:      "و",
+      privacyLink:   "سياسة الخصوصية",
+      termsRequired: "يجب الموافقة على شروط الاستخدام للمتابعة",
     },
   }[lang];
 
   // ── Detect OAuth error in URL (e.g. bad_oauth_state) ──
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params    = new URLSearchParams(window.location.search);
     const errorCode = params.get("error_code");
     const errorDesc = params.get("error_description");
     if (errorCode) {
@@ -78,15 +125,33 @@ const LoginPage = () => {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        log(`EVENT: ${event} | ${session?.user?.email ?? "no user"}`);
         if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
-          if (handledRef.current) { log("SKIP: already handled"); return; }
+          if (handledRef.current) return;
           handledRef.current = true;
           await handlePostLogin(session.user.id, session.user);
         }
+
         if (event === "SIGNED_OUT") {
+          let live = null;
+          try {
+            const { data } = await supabase.auth.getSession();
+            live = data.session;
+          } catch (e: any) {
+            if (e?.name === "AbortError" || e?.code === 20) return;
+          }
+          if (live) return;
+
           handledRef.current = false;
           setProcessing(false);
+
+          if (stepRef.current === "setup") {
+            setStepSync("login");
+            toast.error(
+              isRtl
+                ? "انتهت الجلسة، سجّل الدخول مجدداً"
+                : "Session expired. Please sign in again."
+            );
+          }
         }
       }
     );
@@ -100,7 +165,6 @@ const LoginPage = () => {
     setProcessing(true);
     setUserId(uid);
 
-    // timeout — إذا عالق أكتر من 15 ثانية بيرجع للبداية
     processingRef.current = setTimeout(() => {
       handledRef.current = false;
       setProcessing(false);
@@ -108,47 +172,61 @@ const LoginPage = () => {
     }, 15000);
 
     try {
-      // Sync to Make.com — fire and forget
-      const MAKE_URL = import.meta.env.VITE_MAKE_LOGIN_SYNC;
-      if (MAKE_URL) {
+      const EF_USER_SYNC = import.meta.env.VITE_EF_USER_SYNC;
+      if (EF_USER_SYNC) {
         const pending = localStorage.getItem("pending_user_data");
         const parsed  = pending ? JSON.parse(pending) : {};
-        fetch(MAKE_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: uid, email: user.email,
-            region: parsed.region || "LB", language: parsed.language || lang,
-            lat: parsed.lat || 0, lon: parsed.lon || 0,
-            timestamp: new Date().toISOString(),
-          }),
-        }).catch(() => {});
+
+        // Get fresh JWT token to authenticate the request
+        const { data: { session: liveSession } } = await supabase.auth.getSession();
+        const accessToken = liveSession?.access_token;
+
+        if (accessToken) {
+          fetch(EF_USER_SYNC, {
+            method: "POST",
+            headers: {
+              "Content-Type":  "application/json",
+              "Authorization": `Bearer ${accessToken}`,   // ← JWT يُرسل هنا
+            },
+            body: JSON.stringify({
+              // userId و email لا يُرسلان — يُقرآن من الـ JWT في السيرفر
+              region:    parsed.region   || "LB",
+              language:  parsed.language || lang,
+              lat:       parsed.lat      || 0,
+              lon:       parsed.lon      || 0,
+              timestamp: new Date().toISOString(),
+            }),
+          }).catch(() => {});
+        }
+
         if (pending) localStorage.removeItem("pending_user_data");
       }
 
-      // تحقق إذا المستخدم أكمل الإعداد
       const { data: userData, error } = await supabase
         .from("users")
         .select("username, first_name")
         .eq("id", uid)
         .maybeSingle();
 
-      log(`DB: username="${userData?.username ?? "NULL"}" | err="${error?.message ?? "none"}"`);
-
       if (error) throw error;
 
       if (userData?.username) {
-        log("→ navigating to /dashboard");
-        setTimeout(() => window.location.replace("/dashboard"), 2000);
+        window.location.replace("/dashboard");
       } else {
         const fullName: string = user.user_metadata?.full_name || "";
         const parts = fullName.trim().split(" ");
         setFirstName(parts[0] || "");
         setLastName(parts.slice(1).join(" ") || "");
         setProcessing(false);
-        setStep("setup");
+        setStepSync("setup");
       }
     } catch (err: any) {
+      // AbortError: component unmounted or a newer auth event superseded this one.
+      // The login may still succeed via the next auth event — don't surface noise.
+      if (err?.name === "AbortError" || err?.code === 20) {
+        if (processingRef.current) clearTimeout(processingRef.current);
+        return;
+      }
       handledRef.current = false;
       setProcessing(false);
       toast.error(isRtl ? "حدث خطأ، حاول مجدداً" : "Something went wrong. Please try again.");
@@ -157,7 +235,7 @@ const LoginPage = () => {
     }
   };
 
-  // ── Google OAuth — simple, no localStorage manipulation ──
+  // ── Google OAuth ──
   const handleGoogleLogin = async () => {
     try {
       setProcessing(true);
@@ -169,16 +247,19 @@ const LoginPage = () => {
         },
       });
       if (error) throw error;
-      // Page will redirect — processing stays true until redirect
+      // Page is now redirecting to Google — processing spinner stays visible
     } catch (err: any) {
+      // AbortError is expected: browser aborts pending fetches when the page
+      // navigates away during the OAuth redirect. Safe to ignore silently.
+      if (err?.name === "AbortError" || err?.code === 20) return;
       setProcessing(false);
-      toast.error(err.message);
+      toast.error(err.message || "Authentication failed.");
     }
   };
 
-  // ── Username check ──
+  // ── Username check (debounced 400ms) ──
   const usernameRegex = /^[a-z0-9_]{3,20}$/;
-  const handleUsernameChange = async (val: string) => {
+  const handleUsernameChange = (val: string) => {
     const clean = val.toLowerCase().replace(/[^a-z0-9_]/g, "");
     setUsername(clean);
     if (!usernameRegex.test(clean)) {
@@ -186,8 +267,51 @@ const LoginPage = () => {
       return;
     }
     setUsernameStatus("checking");
-    const { data } = await supabase.from("users").select("id").eq("username", clean).maybeSingle();
-    setUsernameStatus(data ? "taken" : "available");
+    if (usernameDebounceRef.current) clearTimeout(usernameDebounceRef.current);
+    usernameDebounceRef.current = setTimeout(async () => {
+      const { data } = await supabase.from("users").select("id").eq("username", clean).maybeSingle();
+      setUsernameStatus(data ? "taken" : "available");
+    }, 400);
+  };
+
+  // ── NEW: Promo code validation (debounced 600ms) ──
+  const handlePromoCodeChange = (val: string) => {
+    // Normalize to uppercase, allow letters/numbers/dashes only
+    const clean = val.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    setPromoCode(clean);
+
+    if (promoDebounceRef.current) clearTimeout(promoDebounceRef.current);
+
+    if (!clean || clean.length < 4) {
+      setPromoStatus("idle");
+      return;
+    }
+
+    setPromoStatus("checking");
+    promoDebounceRef.current = setTimeout(async () => {
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, promo_expires_at")
+        .eq("promo_code", clean)
+        .maybeSingle();
+
+      if (error || !data) {
+        setPromoStatus("invalid");
+        return;
+      }
+
+      // Prevent self-referral
+      if (data.id === userId) {
+        setPromoStatus("invalid");
+        return;
+      }
+
+      const isExpired = data.promo_expires_at
+        ? new Date(data.promo_expires_at) < new Date()
+        : false;
+
+      setPromoStatus(isExpired ? "invalid" : "valid");
+    }, 600);
   };
 
   // ── Save profile (new user setup) ──
@@ -200,29 +324,76 @@ const LoginPage = () => {
       toast.error(isRtl ? "الرجاء اختيار اسم مستخدم صحيح ومتاح" : "Please choose a valid, available username");
       return;
     }
-    setSaving(true);
-    const profileData = { first_name: firstName.trim(), last_name: lastName.trim(), username: username.trim() };
-
-    const { error: uErr } = await supabase.from("users").upsert({ id: userId, ...profileData }, { onConflict: "id" });
-    if (uErr) {
-      setSaving(false);
-      if (uErr.code === "23505") { setUsernameStatus("taken"); toast.error(isRtl ? "اسم المستخدم محجوز" : "Username taken, try another"); }
-      else toast.error(uErr.message);
+    if (!agreedToTerms) {
+      toast.error(t.termsRequired);
       return;
     }
-    const { error: pErr } = await supabase.from("profiles").upsert({ id: userId, ...profileData }, { onConflict: "id" });
+
+    const { data: { session: liveSession } } = await supabase.auth.getSession();
+    if (!liveSession) {
+      handledRef.current = false;
+      setStepSync("login");
+      toast.error(isRtl ? "انتهت الجلسة، سجّل الدخول مجدداً" : "Session expired. Please sign in again.");
+      return;
+    }
+
+    setSaving(true);
+
+    const profileData: Record<string, any> = {
+      first_name: firstName.trim(),
+      last_name:  lastName.trim(),
+      username:   username.trim(),
+    };
+
+    // Include referred_by only if promo code was verified valid
+    if (promoStatus === "valid" && promoCode.trim()) {
+      profileData.referred_by = promoCode.trim();
+    }
+
+    const { error: uErr } = await supabase
+      .from("users")
+      .upsert({ id: userId, ...profileData }, { onConflict: "id" });
+
+    if (uErr) {
+      setSaving(false);
+      if (uErr.code === "23505") {
+        setUsernameStatus("taken");
+        toast.error(isRtl ? "اسم المستخدم محجوز" : "Username taken, try another");
+      } else {
+        toast.error(uErr.message);
+      }
+      return;
+    }
+
+    // Sync to profiles table (public profile)
+    const { error: pErr } = await supabase
+      .from("profiles")
+      .upsert(
+        { id: userId, first_name: firstName.trim(), last_name: lastName.trim(), username: username.trim() },
+        { onConflict: "id" }
+      );
+
     if (pErr) {
       setSaving(false);
       toast.error(pErr.message);
       return;
     }
+
     setSaving(false);
-    toast.success(isRtl ? "تم إنشاء حسابك بنجاح!" : "Account created successfully!");
-    navigate("/dashboard");
+    toast.success(isRtl ? "تم إنشاء حسابك بنجاح! لنبني سيرتك الذاتية 🚀" : "Account created! Let's build your CV 🚀");
+    navigate("/build");
   };
 
-  const canSave = firstName.trim() && lastName.trim() && usernameStatus === "available" && !saving;
-  const inp = "w-full bg-[rgba(60,80,125,0.06)] border border-[rgba(60,80,125,0.2)] rounded-lg px-4 py-3 text-sm text-[#F5F0E9] outline-none focus:border-[#12B2C1]/50 transition-colors placeholder-[#566C9E]";
+  // ── Derived state ──
+  const canSave = !!(
+    firstName.trim() &&
+    lastName.trim() &&
+    usernameStatus === "available" &&
+    agreedToTerms &&
+    !saving
+  );
+
+  const inp = "w-full bg-[rgba(60,80,125,0.06)] border border-[rgba(60,80,125,0.2)] rounded-lg px-4 py-3 text-sm text-[#F5F0E9] outline-none focus:border-[#12B2C1]/50 transition-colors placeholder-[#e1ebed]";
 
   return (
     <div
@@ -235,9 +406,15 @@ const LoginPage = () => {
         <div className="absolute bottom-[-10%] left-[15%] w-[400px] h-[400px] rounded-full bg-[rgba(60,80,125,0.07)] blur-[110px]" />
       </div>
 
-      <div className="relative z-10 w-full max-w-md rounded-2xl overflow-hidden"
-        style={{ background:"rgba(13,17,23,0.85)", backdropFilter:"blur(28px)", border:"1px solid rgba(60,80,125,0.2)", boxShadow:"0 0 60px rgba(18,178,193,0.04), 0 24px 48px rgba(0,0,0,0.4)" }}>
-
+      <div
+        className="relative z-10 w-full max-w-md rounded-2xl overflow-hidden"
+        style={{
+          background:       "rgba(13,17,23,0.85)",
+          backdropFilter:   "blur(28px)",
+          border:           "1px solid rgba(60,80,125,0.2)",
+          boxShadow:        "0 0 60px rgba(18,178,193,0.04), 0 24px 48px rgba(0,0,0,0.4)",
+        }}
+      >
         <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#12B2C1]/40 to-transparent" />
 
         <div className="p-8 lg:p-10">
@@ -250,7 +427,7 @@ const LoginPage = () => {
             <span className="text-lg font-bold tracking-widest text-[#F5F0E9] uppercase">
               Resumation<span className="text-[#E0C58F]">.co</span>
             </span>
-            <span className="text-[9px] font-mono tracking-[0.3em] text-[#566C9E] uppercase mt-1">{t.tagline}</span>
+            <span className="text-[10px] font-mono tracking-[0.3em] text-[#e1ebed] uppercase mt-1">{t.tagline}</span>
           </div>
 
           {/* ── STEP: LOGIN ── */}
@@ -265,10 +442,13 @@ const LoginPage = () => {
                 onClick={handleGoogleLogin}
                 disabled={processing}
                 className="w-full flex items-center justify-center gap-3 py-4 px-5 rounded-xl font-bold text-sm text-[#F5F0E9] transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed hover:shadow-[0_0_24px_rgba(18,178,193,0.12)]"
-                style={{ background:"rgba(60,80,125,0.1)", border:"1px solid rgba(60,80,125,0.25)" }}
+                style={{ background: "rgba(60,80,125,0.1)", border: "1px solid rgba(60,80,125,0.25)" }}
               >
                 {processing ? (
-                  <><Loader2 className="w-5 h-5 animate-spin text-[#12B2C1]"/><span>{isRtl ? "جاري تسجيل الدخول..." : "Signing in..."}</span></>
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin text-[#12B2C1]" />
+                    <span>{isRtl ? "جاري تسجيل الدخول..." : "Signing in..."}</span>
+                  </>
                 ) : (
                   <>
                     <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
@@ -284,10 +464,10 @@ const LoginPage = () => {
 
               <div className="w-full pt-4 border-t border-[#3C507D]/10 flex flex-col items-center gap-3">
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[rgba(18,178,193,0.04)] border border-[#12B2C1]/10">
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#12B2C1]"/>
-                  <span className="text-[9px] font-mono text-[#12B2C1] uppercase tracking-widest">{t.security}</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#12B2C1]" />
+                  <span className="text-[10px] font-mono text-[#12B2C1] uppercase tracking-widest">{t.security}</span>
                 </div>
-                <span className="text-[9px] text-[#3C507D] font-mono tracking-wider uppercase">{t.infra}</span>
+                <span className="text-[10px] text-[#3C507D] font-mono tracking-wider uppercase">{t.infra}</span>
               </div>
             </div>
           )}
@@ -300,49 +480,153 @@ const LoginPage = () => {
                 <p className="text-xs text-[#A8B4CC] leading-[1.8]">{t.setupSub}</p>
               </div>
 
+              {/* First Name */}
               <div className="space-y-1.5">
-                <label className="flex items-center gap-2 text-[11px] font-semibold text-[#E0C58F] uppercase tracking-wider">
-                  <User className="w-3.5 h-3.5"/> {t.firstName}
+                <label className="flex items-center gap-2 text-[12px] font-semibold text-[#E0C58F] uppercase tracking-wider">
+                  <User className="w-3.5 h-3.5" /> {t.firstName}
                 </label>
-                <input value={firstName} onChange={e=>setFirstName(e.target.value)} className={inp} placeholder={isRtl?"أحمد":"John"}/>
+                <input
+                  value={firstName}
+                  onChange={e => setFirstName(e.target.value)}
+                  className={inp}
+                  placeholder={isRtl ? "أحمد" : "John"}
+                />
               </div>
 
+              {/* Last Name */}
               <div className="space-y-1.5">
-                <label className="flex items-center gap-2 text-[11px] font-semibold text-[#E0C58F] uppercase tracking-wider">
-                  <User className="w-3.5 h-3.5"/> {t.lastName}
+                <label className="flex items-center gap-2 text-[12px] font-semibold text-[#E0C58F] uppercase tracking-wider">
+                  <User className="w-3.5 h-3.5" /> {t.lastName}
                 </label>
-                <input value={lastName} onChange={e=>setLastName(e.target.value)} className={inp} placeholder={isRtl?"علي":"Doe"}/>
+                <input
+                  value={lastName}
+                  onChange={e => setLastName(e.target.value)}
+                  className={inp}
+                  placeholder={isRtl ? "علي" : "Doe"}
+                />
               </div>
 
+              {/* Username */}
               <div className="space-y-1.5">
-                <label className="flex items-center gap-2 text-[11px] font-semibold text-[#E0C58F] uppercase tracking-wider">
-                  <AtSign className="w-3.5 h-3.5"/> {t.usernameLbl}
+                <label className="flex items-center gap-2 text-[12px] font-semibold text-[#E0C58F] uppercase tracking-wider">
+                  <AtSign className="w-3.5 h-3.5" /> {t.usernameLbl}
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#566C9E] text-sm font-mono select-none">@</span>
-                  <input value={username} onChange={e=>handleUsernameChange(e.target.value)} dir="ltr"
-                    className={`${inp} pl-8 pr-10 font-mono`} placeholder={t.usernamePh} maxLength={20}/>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#e1ebed] text-sm font-mono select-none">@</span>
+                  <input
+                    value={username}
+                    onChange={e => handleUsernameChange(e.target.value)}
+                    dir="ltr"
+                    className={`${inp} pl-8 pr-10 font-mono`}
+                    placeholder={t.usernamePh}
+                    maxLength={20}
+                  />
                   <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                    {usernameStatus==="checking"  && <Loader2 className="w-4 h-4 text-[#566C9E] animate-spin"/>}
-                    {usernameStatus==="available" && <CheckCircle2 className="w-4 h-4 text-emerald-400"/>}
-                    {(usernameStatus==="taken"||usernameStatus==="invalid") && <XCircle className="w-4 h-4 text-red-400"/>}
+                    {usernameStatus === "checking"  && <Loader2 className="w-4 h-4 text-[#e1ebed] animate-spin" />}
+                    {usernameStatus === "available" && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                    {(usernameStatus === "taken" || usernameStatus === "invalid") && <XCircle className="w-4 h-4 text-red-400" />}
                   </div>
                 </div>
-                <div className="text-[10px] font-mono">
-                  {usernameStatus==="idle"      && <span className="text-[#566C9E]">{t.usernameHint}</span>}
-                  {usernameStatus==="checking"  && <span className="text-[#566C9E]">{t.checking}</span>}
-                  {usernameStatus==="available" && <span className="text-emerald-400">{t.available}</span>}
-                  {usernameStatus==="taken"     && <span className="text-red-400">{t.taken}</span>}
-                  {usernameStatus==="invalid"   && <span className="text-amber-400">{t.usernameHint}</span>}
+                <div className="text-[11px] font-mono">
+                  {usernameStatus === "idle"      && <span className="text-[#e1ebed]">{t.usernameHint}</span>}
+                  {usernameStatus === "checking"  && <span className="text-[#e1ebed]">{t.checking}</span>}
+                  {usernameStatus === "available" && <span className="text-emerald-400">{t.available}</span>}
+                  {usernameStatus === "taken"     && <span className="text-red-400">{t.taken}</span>}
+                  {usernameStatus === "invalid"   && <span className="text-amber-400">{t.usernameHint}</span>}
                 </div>
               </div>
 
-              <button onClick={handleSaveProfile} disabled={!canSave}
+              {/* ── NEW: Referral Code (optional) ── */}
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 text-[12px] font-semibold text-[#A8B4CC] uppercase tracking-wider">
+                  <Tag className="w-3.5 h-3.5" />
+                  {t.promoLbl}
+                  <span className="normal-case tracking-normal font-normal text-[#3C507D] lowercase">
+                    {isRtl ? "(اختياري)" : "(optional)"}
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    value={promoCode}
+                    onChange={e => handlePromoCodeChange(e.target.value)}
+                    dir="ltr"
+                    className={`${inp} pr-10 font-mono tracking-widest`}
+                    placeholder={t.promoPh}
+                    maxLength={10}
+                  />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {promoStatus === "checking" && <Loader2 className="w-4 h-4 text-[#e1ebed] animate-spin" />}
+                    {promoStatus === "valid"    && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                    {promoStatus === "invalid"  && <XCircle className="w-4 h-4 text-red-400" />}
+                  </div>
+                </div>
+                <div className="text-[11px] font-mono">
+                  {promoStatus === "idle"     && <span className="text-[#3C507D]">{t.promoHint}</span>}
+                  {promoStatus === "checking" && <span className="text-[#e1ebed]">{t.promoChecking}</span>}
+                  {promoStatus === "valid"    && <span className="text-emerald-400">{t.promoValid}</span>}
+                  {promoStatus === "invalid"  && <span className="text-red-400">{t.promoInvalid}</span>}
+                </div>
+              </div>
+
+              {/* ── NEW: Terms of Service Checkbox ── */}
+              <div
+                className="flex items-start gap-3 p-4 rounded-xl border transition-colors cursor-pointer select-none"
+                style={{
+                  background:   agreedToTerms ? "rgba(18,178,193,0.06)" : "rgba(60,80,125,0.04)",
+                  borderColor:  agreedToTerms ? "rgba(18,178,193,0.25)" : "rgba(60,80,125,0.15)",
+                }}
+                onClick={() => setAgreedToTerms(v => !v)}
+              >
+                {/* Custom checkbox */}
+                <div
+                  className="flex-shrink-0 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all mt-0.5"
+                  style={{
+                    borderColor:  agreedToTerms ? "#12B2C1" : "rgba(60,80,125,0.4)",
+                    background:   agreedToTerms ? "#12B2C1"  : "transparent",
+                  }}
+                >
+                  {agreedToTerms && (
+                    <svg className="w-3 h-3 text-[#0D1117]" viewBox="0 0 12 12" fill="none">
+                      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                </div>
+
+                {/* Terms text */}
+                <p className="text-[12px] text-[#A8B4CC] leading-[1.9]">
+                  {t.termsPrefix}{" "}
+                  <a
+                    href="/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={e => e.stopPropagation()}
+                    className="text-[#12B2C1] hover:text-[#E0C58F] underline underline-offset-2 transition-colors font-semibold"
+                  >
+                    {t.termsLink}
+                  </a>
+                  {" "}{t.termsAnd}{" "}
+                  <a
+                    href="/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={e => e.stopPropagation()}
+                    className="text-[#12B2C1] hover:text-[#E0C58F] underline underline-offset-2 transition-colors font-semibold"
+                  >
+                    {t.privacyLink}
+                  </a>
+                </p>
+              </div>
+
+              {/* Save button */}
+              <button
+                onClick={handleSaveProfile}
+                disabled={!canSave}
                 className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm text-[#0D1117] transition-all duration-300 mt-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ background: canSave ? "linear-gradient(135deg,#12B2C1,#0E8F9C)" : "rgba(60,80,125,0.3)" }}>
+                style={{ background: canSave ? "linear-gradient(135deg,#12B2C1,#0E8F9C)" : "rgba(60,80,125,0.3)" }}
+              >
                 {saving
-                  ? <><Loader2 className="w-4 h-4 animate-spin"/> {t.saving}</>
-                  : <>{t.saveBtn} <ChevronRight className="w-4 h-4"/></>}
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> {t.saving}</>
+                  : <>{t.saveBtn} <ChevronRight className="w-4 h-4" /></>}
               </button>
             </div>
           )}
@@ -351,12 +635,6 @@ const LoginPage = () => {
         <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-[#E0C58F]/20 to-transparent" />
       </div>
 
-      {/* DEBUG PANEL — مؤقت للتشخيص */}
-      {debugLog.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 text-green-400 font-mono text-[11px] p-3 max-h-48 overflow-y-auto">
-          {debugLog.map((line, i) => <div key={i}>{line}</div>)}
-        </div>
-      )}
     </div>
   );
 };

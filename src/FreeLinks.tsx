@@ -1,10 +1,18 @@
+﻿import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ExternalLink, Lock, ArrowUpCircle } from "lucide-react";
 import { employersList } from "./data/employersData";
+import { supabase } from "./supabase";
 
 export default function FreeLinks() {
   const navigate = useNavigate();
   const freeCompanies = employersList.slice(0, 2);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) navigate("/login");
+    });
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-cyber-bg py-20 px-4 flex flex-col items-center font-sans relative overflow-hidden">
@@ -20,7 +28,7 @@ export default function FreeLinks() {
                 {company.name.charAt(0)}
               </div>
               <h3 className="text-xl font-black text-white mb-2">{company.name}</h3>
-              <p className="text-cyber-dim text-[10px] mb-6 uppercase font-bold tracking-widest">{company.industry}</p>
+              <p className="text-cyber-dim text-[11px] mb-6 uppercase font-bold tracking-widest">{company.industry}</p>
               <a href={company.careerPageUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-cyber-cyan font-black hover:text-white transition-colors">
                 Visit Career Page <ExternalLink className="w-4 h-4" />
               </a>

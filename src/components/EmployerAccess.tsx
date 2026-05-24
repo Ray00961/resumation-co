@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Building2, Lock, CheckCircle, Loader2, ShieldAlert, Zap, ArrowUpRight } from "lucide-react"; 
 import { employersList } from "../data/employersData";
@@ -16,15 +16,17 @@ export default function EmployerAccess() {
       const { data: { session } } = await supabase.auth.getSession();
       
       if (session?.user) {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('selected_plan, package_name')
-          .eq('id', session.user.id)
+        // selected_plan was removed from users — read package_name from latest cv_archive
+        const { data: archiveData } = await supabase
+          .from('cv_archive')
+          .select('package_name')
+          .eq('user_id', session.user.id)
+          .order('created_at_utc', { ascending: false })
+          .limit(1)
           .single();
 
-        if (userData) {
-          const plan = (userData.selected_plan || userData.package_name || 'free').toLowerCase().trim();
-          // لا يفتح إلا إذا كانت الخطة ليست مجانية
+        if (archiveData) {
+          const plan = (archiveData.package_name || 'free').toLowerCase().trim();
           if (plan !== 'free') {
             setIsUnlocked(true);
           }
@@ -64,7 +66,7 @@ export default function EmployerAccess() {
           <h2 className="text-3xl sm:text-5xl font-black text-white mb-6 uppercase tracking-tight">
             Exclusive <span className="text-cyber-cyan">Employer</span> Database
           </h2>
-          <p className="text-cyber-dim font-medium max-w-2xl mx-auto uppercase tracking-widest text-[10px]">
+          <p className="text-cyber-dim font-medium max-w-2xl mx-auto uppercase tracking-widest text-[11px]">
             Real-time direct access to top-tier hiring nodes in Engineering, Medical, and Global Banking.
           </p>
         </div>
@@ -119,7 +121,7 @@ export default function EmployerAccess() {
                   </h3>
                   <div className="flex items-center gap-2 mt-1">
                     <Zap className="w-3 h-3 text-cyber-cyan" />
-                    <span className="text-[10px] font-black text-cyber-teal uppercase tracking-widest">
+                    <span className="text-[11px] font-black text-cyber-teal uppercase tracking-widest">
                         {employer.industry}
                     </span>
                   </div>
@@ -132,9 +134,9 @@ export default function EmployerAccess() {
 
         {/* Global Stats Meta */}
         <div className="mt-20 pt-10 border-t border-white/5 flex justify-center items-center gap-12 opacity-20 pointer-events-none">
-             <div className="flex items-center gap-2"><span className="text-[9px] font-black text-white uppercase tracking-[0.3em]">Total Hiring Nodes: 250+</span></div>
-             <div className="flex items-center gap-2"><span className="text-[9px] font-black text-white uppercase tracking-[0.3em]">Update Frequency: Daily</span></div>
-             <div className="flex items-center gap-2"><span className="text-[9px] font-black text-white uppercase tracking-[0.3em]">Sync Speed: 0.2ms</span></div>
+             <div className="flex items-center gap-2"><span className="text-[10px] font-black text-white uppercase tracking-[0.3em]">Total Hiring Nodes: 250+</span></div>
+             <div className="flex items-center gap-2"><span className="text-[10px] font-black text-white uppercase tracking-[0.3em]">Update Frequency: Daily</span></div>
+             <div className="flex items-center gap-2"><span className="text-[10px] font-black text-white uppercase tracking-[0.3em]">Sync Speed: 0.2ms</span></div>
         </div>
 
       </div>

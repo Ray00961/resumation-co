@@ -1,108 +1,194 @@
 import { useEffect, useState } from "react";
-import { Loader2, Globe, Gift, Star, Crown, Activity, ArrowRight } from "lucide-react";
+import { Loader2, Globe, Zap, ShieldCheck, Crown, Activity, ArrowRight, Check, Sparkles, Search, PenLine, BrainCircuit, Gift } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabase";
 import Cookies from "js-cookie";
-import { motion } from "framer-motion";
+import { detectRegion } from "../utils/detectRegion";
+import { useLang } from "../context/LanguageContext";
+
+type PlanType = "free" | "premium" | "gold" | "ai_search";
 
 export default function PlansPage() {
   const navigate = useNavigate();
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [submissionId, setSubmissionId] = useState<string | null>(null);
-  const [oldSubmissionId, setOldSubmissionId] = useState<string | null>(null);
-  const [loading, setLoading] = useState<string | null>(null);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const [userRegion, setUserRegion] = useState<string>(Cookies.get("user_region") || "LB");
+  const { lang, isRtl } = useLang();
 
-  const PREMIUM_LINK_EGY = "https://accept.paymobsolutions.com/standalone?ref=p_LRR2djFVeWg0SWhkQzY2dnM3WGQxOFl6Zz09X05IeWQra29pd29zUXRTRHF5QkpxMWc9PQ";
-  const GOLD_LINK_EGY    = "https://accept.paymobsolutions.com/standalone?ref=p_LRR2U0d0ZklEUlIxZUwweWZhUVRGdDVqZz09X1hhTCtGYWhhK1pOSmVyb0pZVFE1dXc9PQ";
+  const [userEmail,       setUserEmail]       = useState<string | null>(null);
+  const [userId,          setUserId]          = useState<string | null>(null);
+  const [userName,        setUserName]        = useState<string | null>(null);
+  const [submissionId,    setSubmissionId]    = useState<string | null>(null);
+  const [oldSubmissionId, setOldSubmissionId] = useState<string | null>(null);
+  const [loading,         setLoading]         = useState<PlanType | null>(null);
+  const [payError,        setPayError]        = useState<string | null>(null);
+  const [isCheckingAuth,  setIsCheckingAuth]  = useState(true);
+  const [userRegion,      setUserRegion]      = useState<string>(Cookies.get("user_region") || "LB");
+  const [hasReferral,     setHasReferral]     = useState(false);
+
+  // ── Derived ──
+  const isEgypt = userRegion === "EG";
+
+  // Paymob standalone links (Egypt)
+  const PREMIUM_LINK_EGY   = "https://accept.paymobsolutions.com/standalone?ref=p_LRR2djFVeWg0SWhkQzY2dnM3WGQxOFl6Zz09X05IeWQra29pd29zUXRTRHF5QkpxMWc9PQ";
+  const GOLD_LINK_EGY      = "https://accept.paymobsolutions.com/standalone?ref=p_LRR2U0d0ZklEUlIxZUwweWZhUVRGdDVqZz09X1hhTCtGYWhhK1pOSmVyb0pZVFE1dXc9PQ";
+  const AI_SEARCH_LINK_EGY = (import.meta.env.VITE_PAYMOB_AI_SEARCH_LINK as string) || "";
+
+  // ── Pricing logic ──
+  const BASE = isEgypt
+    ? { premium: 250, gold: 400, ai_search: 100 }
+    : { premium: 25,  gold: 40,  ai_search: 10  };
+
+  // AI Search: price is fixed, coins are doubled. Premium/Gold: price halved.
+  const finalPrice = (plan: "premium" | "gold" | "ai_search"): number =>
+    hasReferral && plan !== "ai_search" ? BASE[plan] / 2 : BASE[plan];
+
+  const finalCoins = (plan: "premium" | "gold" | "ai_search"): number => {
+    if (plan === "premium") return 50;
+    if (plan === "gold")    return 100;
+    return hasReferral ? 200 : 100;
+  };
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const idFromUrl = params.get("id");
-    if (idFromUrl) setSubmissionId(idFromUrl);
+    const params        = new URLSearchParams(window.location.search);
+    const idFromUrl     = params.get("id");
     const oldSubFromUrl = params.get("old_sub");
     if (oldSubFromUrl) setOldSubmissionId(oldSubFromUrl);
 
-    const initializePage = async () => {
+    // Hard bailout — never leave user stuck on spinner
+    const bailout = setTimeout(() => setIsCheckingAuth(false), 8000);
+
+    const init = async () => {
       try {
-        if (!Cookies.get("user_region")) {
+        // Read session from localStorage first (same pattern as Dashboard — avoids getSession() timing issues)
+        const lsKey = Object.keys(localStorage).find(
+          k => k.startsWith("sb-") && k.endsWith("-auth-token")
+        );
+        let uid: string | null = null;
+        let email: string | null = null;
+        if (lsKey) {
           try {
-            const res = await fetch('https://ipapi.co/json/');
-            const data = await res.json();
-            const detected = data.country_code === 'EG' ? 'EG' : 'LB';
-            Cookies.set("user_region", detected, { expires: 7 });
-            setUserRegion(detected);
-          } catch (e) {
-            console.warn("Region detection fallback to LB");
-          }
+            const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+            uid   = cached?.user?.id   || null;
+            email = cached?.user?.email || cached?.user?.user_metadata?.email || null;
+          } catch {}
         }
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setUserId(user.id);
-          setUserEmail(user.email || "");
-          setUserName(user.user_metadata?.full_name || "User");
-        } else {
-          navigate("/login");
+        // Fallback to getSession() if localStorage didn't have it
+        if (!uid) {
+          const { data: { session } } = await supabase.auth.getSession();
+          uid   = session?.user?.id   || null;
+          email = session?.user?.email || session?.user?.user_metadata?.email || null;
         }
-      } catch (error) {
-        console.error("Initialization error:", error);
+        if (!uid) { navigate("/login"); return; }
+
+        setUserId(uid);
+        setUserEmail(email || "");
+
+        // Region detection — non-blocking
+        detectRegion().then(r => setUserRegion(r)).catch(() => {});
+
+        const { data: userData } = await supabase
+          .from("users")
+          .select("first_name, referred_by")
+          .eq("id", uid)
+          .single();
+
+        setUserName(userData?.first_name || "User");
+
+        // submission_id always comes from cv_archive (source of truth)
+        let resolvedSubId = idFromUrl || null;
+        if (!resolvedSubId) {
+          const { data: arc } = await supabase
+            .from("cv_archive")
+            .select("submission_id")
+            .eq("user_id", uid)
+            .order("id", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          resolvedSubId = arc?.submission_id || null;
+        }
+        if (!resolvedSubId) { navigate("/build"); return; }
+
+        setSubmissionId(resolvedSubId);
+        setHasReferral(!!(userData?.referred_by));
+
+      } catch (err) {
+        console.error("Init error:", err);
       } finally {
+        clearTimeout(bailout);
         setIsCheckingAuth(false);
       }
     };
-
-    initializePage();
+    init();
   }, [navigate]);
 
-  const handlePaidPlan = async (plan: "premium" | "gold") => {
-    if (!userEmail || !userId) return;
-    const PRE_PAYMENT_WEBHOOK = import.meta.env.VITE_MAKE_PRE_PAYMENT;
-    if (!PRE_PAYMENT_WEBHOOK) { console.error("Pre-payment configuration missing"); return; }
+  // ── Payment handler (premium / gold / ai_search) ──
+  const handlePaidPlan = async (plan: "premium" | "gold" | "ai_search") => {
+    if (!userId) {
+      setPayError("Session error — please refresh and try again.");
+      return;
+    }
+    const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
+    if (!EF_URL) {
+      setPayError("Config error — please contact support.");
+      return;
+    }
 
     setLoading(plan);
-    const isEgypt = userRegion === "EG";
-    const finalSid = submissionId || "NO_ID";
-    const amount   = isEgypt ? (plan === 'premium' ? 50 : 250) : (plan === 'premium' ? 2 : 5);
-    const currency = isEgypt ? "EGP" : "USD";
+    setPayError(null);
+    const sid = submissionId || "NO_ID";
+    const amt = finalPrice(plan);
+    const cur = isEgypt ? "EGP" : "USD";
+
+    const body = {
+      user_id: userId, email: userEmail, full_name: userName,
+      payment_id: sid, old_sub: oldSubmissionId || null,
+      plan, region: userRegion,
+      amount: amt, original_amount: BASE[plan], currency: cur,
+      has_referral: hasReferral, coins: finalCoins(plan),
+    };
 
     try {
-      const response = await fetch(PRE_PAYMENT_WEBHOOK, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId, email: userEmail, full_name: userName,
-          payment_id: finalSid, old_sub: oldSubmissionId || null,
-          plan, region: userRegion, amount, currency
-        }),
-      });
-
       if (isEgypt) {
-        const customIdentifier = `${userId}---${finalSid}`;
-        const baseLink = plan === 'premium' ? PREMIUM_LINK_EGY : GOLD_LINK_EGY;
-        const paymobUrl = baseLink
-          + `&billing_data[first_name]=${encodeURIComponent(userName || 'User')}`
+        await fetch(EF_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...body, payment_method: "paymob" }),
+        });
+
+        const linkMap: Record<string, string> = {
+          premium: PREMIUM_LINK_EGY, gold: GOLD_LINK_EGY, ai_search: AI_SEARCH_LINK_EGY,
+        };
+        const baseLink = linkMap[plan];
+        if (!baseLink) { setLoading(null); return; }
+
+        const cid = `${userId}---${sid}`;
+        window.location.href = baseLink
+          + `&billing_data[first_name]=${encodeURIComponent(userName || "User")}`
           + `&billing_data[last_name]=Customer`
           + `&billing_data[email]=${encodeURIComponent(userEmail)}`
           + `&billing_data[phone_number]=01111111111`
-          + `&billing_data[street]=${encodeURIComponent(customIdentifier)}`
-          + `&merchant_order_id=${encodeURIComponent(customIdentifier)}`;
-        window.location.href = paymobUrl;
+          + `&billing_data[street]=${encodeURIComponent(cid)}`
+          + `&merchant_order_id=${encodeURIComponent(cid)}`;
+
       } else {
-        const result = await response.json();
-        const collectUrl = result?.collectUrl || result?.data?.collectUrl || result?.url || result?.paymentUrl;
-        if (collectUrl) {
-          let finalUrl = collectUrl.trim();
-          if (!finalUrl.startsWith('http')) finalUrl = `https://${finalUrl}`;
-          window.location.replace(finalUrl);
+        const res    = await fetch(EF_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...body, payment_method: "whish" }),
+        });
+        const result = await res.json().catch(() => ({}));
+        const url    = result?.collectUrl || result?.data?.collectUrl || result?.url || result?.paymentUrl;
+        if (url) {
+          let final = url.trim();
+          if (!final.startsWith("http")) final = `https://${final}`;
+          window.location.replace(final);
         } else {
-          alert("Payment link error. Please try again.");
+          const errMsg = result?.error || result?.message || JSON.stringify(result);
+          console.error("WishMoney no collectUrl:", result);
+          setPayError(`Payment gateway error: ${errMsg}`);
         }
       }
     } catch (err) {
-      console.warn("Connection error:", err);
+      console.warn("Payment error:", err);
+      setPayError(`Network error — please try again.`);
     } finally {
       setLoading(null);
     }
@@ -110,129 +196,425 @@ export default function PlansPage() {
 
   const handleFreePlan = async () => {
     if (!userEmail) return;
-    const FREE_TRIAL_WEBHOOK = import.meta.env.VITE_MAKE_FREE_TRIAL;
-    if (!FREE_TRIAL_WEBHOOK) { navigate('/package-access'); return; }
-
-    setLoading('free');
+    const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
+    if (!EF_URL) { navigate("/package-access"); return; }
+    setLoading("free");
     try {
-      await fetch(FREE_TRIAL_WEBHOOK, {
+      await fetch(EF_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          user_id: userId,
           id: submissionId || userEmail, old_sub: oldSubmissionId || null,
-          email: userEmail, plan: "free", region: userRegion
+          email: userEmail, plan: "free", region: userRegion,
+          payment_method: "free",
         }),
       });
-    } catch (e) {
-      console.warn("Webhook error", e);
-    } finally {
-      setLoading(null);
-      navigate('/package-access');
-    }
+    } catch {}
+    finally { setLoading(null); navigate("/package-access"); }
   };
 
+  // ── Translations ──
+  const t = {
+    en: {
+      regionLb: "🇱🇧 Lebanon — Whish Money · USD",
+      regionEg: "🇪🇬 Egypt — Paymob · EGP",
+      h1: "Choose Your", h2: "Career Plan",
+      sub: "One-time payment · Instant delivery · No subscriptions",
+      loggedAs: "Logged in as",
+      referralBadge: "Referral Discount Active — 50% Off",
+      referralNote: "Prices slashed in half. AI Search Pack earns 2× Coins instead.",
+      currency: isEgypt ? "EGP" : "USD",
+      oneTime: "one-time",
+      mostPopular: "Most Popular",
+      aiPill: "Coin top-up", aiTitle: "AI Hunter", aiSub: "Coins only · No CV build",
+      premPill: "Most popular", premTitle: "Premium",    premSub: "Complete ATS Resume Build",
+      goldPill: "Full suite",   goldTitle: "Gold Package", goldSub: "Complete Application Suite",
+      coinsLabel: "Coins",
+      coinsDouble: "Coins (2× bonus!)",
+      premFeatures: ["Full ATS-optimized CV", "Cover letter included", "50 Coins", "PDF + DOCX export"],
+      goldFeatures: ["Everything in Premium", "100 Coins", "Direct employer links", "Priority processing"],
+      aiFeatures:   ["AI job search", "CV & Cover rewrites", "JD analysis"],
+      btnPrem: "Unlock Premium", btnGold: "Unlock Gold", btnAi: "Top Up Coins",
+      freeLink: "No budget? Start with the Free plan",
+      trustSecure: "Secure Checkout", trustInstant: "Instant Activation", trustOnce: "One-time Payment",
+      coinTitle: "How Coins Work",
+      coinSub: "Every AI-powered action costs Coins. Buy once, use whenever you need.",
+      coinRows: [
+        { icon: "search", cost: "1 Coin",   action: "AI Job Search",            desc: "Returns 2 matching jobs + a compatibility score" },
+        { icon: "pen",    cost: "3 Coins",  action: "Rewrite CV & Cover Letter", desc: "Full AI rewrite aligned to your target role" },
+        { icon: "brain",  cost: "6 Coins",  action: "JD Analysis + Full Rewrite", desc: "Paste any external job description — AI analyzes it then rewrites your CV & Cover Letter to match perfectly" },
+      ],
+    },
+    ar: {
+      regionLb: "🇱🇧 لبنان — Whish Money · USD",
+      regionEg: "🇪🇬 مصر — Paymob · EGP",
+      h1: "اختر", h2: "خطتك المهنية",
+      sub: "دفعة واحدة · تسليم فوري · بدون اشتراكات",
+      loggedAs: "مسجّل دخولك كـ",
+      referralBadge: "خصم الإحالة مفعّل — 50% خصم",
+      referralNote: "الأسعار انخفضت للنصف. باقة AI Search تعطيك ضعف الكوينز بدلاً من خصم السعر.",
+      currency: isEgypt ? "EGP" : "USD",
+      oneTime: "دفعة واحدة",
+      mostPopular: "الأكثر شعبية",
+      aiPill: "شحن رصيد", aiTitle: "AI Hunter", aiSub: "كوينز فقط · بدون بناء CV",
+      premPill: "الأكثر طلباً", premTitle: "بريميوم",    premSub: "بناء سيرة ذاتية متكاملة",
+      goldPill: "الحزمة الكاملة", goldTitle: "باقة الذهب", goldSub: "مجموعة تقديم متكاملة",
+      coinsLabel: "كوين",
+      coinsDouble: "كوين (مضاعف ×2!)",
+      premFeatures: ["سيرة ذاتية محسّنة للـ ATS", "رسالة تغطية مشمولة", "50 كوين", "تصدير PDF + DOCX"],
+      goldFeatures: ["كل مميزات بريميوم", "100 كوين", "روابط مباشرة لأصحاب العمل", "معالجة ذات أولوية"],
+      aiFeatures:   ["بحث وظيفي ذكي", "إعادة كتابة CV والغلاف", "تحليل وصف الوظيفة"],
+      btnPrem: "احصل على بريميوم", btnGold: "احصل على الذهب", btnAi: "اشحن الكوينز",
+      freeLink: "لا ميزانية؟ جرّب الخطة المجانية",
+      trustSecure: "دفع آمن", trustInstant: "تفعيل فوري", trustOnce: "دفعة واحدة",
+      coinTitle: "كيف تعمل الكوينز",
+      coinSub: "كل إجراء بالذكاء الاصطناعي يستهلك كوينز. اشترِ مرة واستخدمها متى شئت.",
+      coinRows: [
+        { icon: "search", cost: "1 كوين",   action: "بحث وظيفي بالذكاء الاصطناعي",       desc: "يعيد وظيفتين متوافقتين مع نقاط التطابق" },
+        { icon: "pen",    cost: "3 كوينز",  action: "إعادة كتابة السيرة ورسالة التغطية",  desc: "إعادة كتابة كاملة تتوافق مع دورك المستهدف" },
+        { icon: "brain",  cost: "6 كوينز",  action: "تحليل JD + إعادة كتابة CV والغلاف", desc: "الصق أي وصف وظيفي خارجي — يحلّله الذكاء الاصطناعي ويعيد كتابة سيرتك ورسالة التغطية بالكامل وفقاً له" },
+      ],
+    },
+  }[lang];
+
+  // ── Loading screen ──
   if (isCheckingAuth) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-cyber-bg">
-        <Loader2 className="animate-spin w-10 h-10 text-cyber-cyan" />
-        <p className="text-cyber-dim font-black uppercase tracking-[0.3em] mt-4 text-[10px]">Verifying Protocol & Zone...</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0D1117] gap-4">
+        <div className="relative">
+          <div className="w-12 h-12 rounded-full border border-[rgba(18,178,193,0.2)] animate-ping absolute inset-0" />
+          <Loader2 className="animate-spin w-12 h-12 text-[rgba(18,178,193,0.8)]" />
+        </div>
+        <p className="text-[#e1ebed] font-bold uppercase tracking-[0.3em] text-[11px] mt-2">
+          Verifying your access...
+        </p>
       </div>
     );
   }
 
-  const isEgypt = userRegion === "EG";
+  // ── JSX helpers ──
+  const CheckBullet = ({ color }: { color: "teal" | "gold" }) => (
+    <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0"
+      style={{
+        background:  color === "teal" ? "rgba(18,178,193,0.15)" : "rgba(224,197,143,0.08)",
+        border: `1px solid ${color === "teal" ? "rgba(18,178,193,0.35)" : "rgba(224,197,143,0.2)"}`,
+      }}>
+      <Check className={`w-2.5 h-2.5 ${color === "teal" ? "text-[rgba(18,178,193,1)]" : "text-[#E0C58F]"}`} />
+    </div>
+  );
+
+  const CoinsBadge = ({ coins, doubled = false }: { coins: number; doubled?: boolean }) => (
+    <div className="flex items-center gap-2 mb-6 px-3 py-1.5 rounded-xl w-fit"
+      style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
+      <Zap className="w-3 h-3 text-amber-400" />
+      <span className="text-[11px] font-black text-amber-400 uppercase tracking-wide">
+        {doubled ? `${coins} ${t.coinsDouble}` : `${coins} ${t.coinsLabel}`}
+      </span>
+    </div>
+  );
+
+  const coinIcon = (type: string) => {
+    if (type === "search") return <Search className="w-5 h-5" />;
+    if (type === "pen")    return <PenLine className="w-5 h-5" />;
+    return <BrainCircuit className="w-5 h-5" />;
+  };
 
   return (
-    <div className="min-h-screen bg-cyber-bg py-24 px-6 font-sans relative overflow-hidden text-center">
+    <div
+      className="min-h-screen bg-[#0D1117] font-sans relative overflow-hidden"
+      dir={isRtl ? "rtl" : "ltr"}
+      style={{ fontFamily: isRtl ? "'Tajawal', sans-serif" : "'Plus Jakarta Sans', sans-serif" }}
+    >
+      {/* Background glows */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-[-20%] right-[-10%] w-[700px] h-[700px] rounded-full"
+          style={{ background: "radial-gradient(circle, rgba(18,178,193,0.07) 0%, transparent 70%)" }} />
+        <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] rounded-full"
+          style={{ background: "radial-gradient(circle, rgba(86,108,158,0.08) 0%, transparent 70%)" }} />
+        <div className="absolute top-[40%] left-[30%] w-[400px] h-[400px] rounded-full"
+          style={{ background: "radial-gradient(circle, rgba(224,197,143,0.04) 0%, transparent 70%)" }} />
+      </div>
+      <div className="fixed inset-0 pointer-events-none z-0"
+        style={{ backgroundImage: "radial-gradient(rgba(18,178,193,0.035) 1px, transparent 1px)", backgroundSize: "32px 32px" }} />
 
-      <div className="absolute top-0 right-0 w-[60vw] h-[60vw] bg-cyber-teal/6 rounded-full blur-[150px] pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-[50vw] h-[50vw] bg-cyber-cyan/5 rounded-full blur-[120px] pointer-events-none" />
+      <div className="relative z-10 max-w-5xl mx-auto px-6 py-20 text-center">
 
-      <div className="relative z-10 max-w-7xl mx-auto">
-
-        <div className="mb-12 inline-flex items-center gap-3 bg-cyber-teal/10 backdrop-blur-md px-6 py-2.5 rounded-full border border-cyber-teal/20 shadow-[0_0_20px_rgba(13,138,158,0.1)]">
-          <Globe className="w-4 h-4 text-cyber-cyan" />
-          <span className="text-[10px] font-black text-cyber-cyan uppercase tracking-[0.2em]">
-            Deployment Zone: {isEgypt ? "Egypt Node 🇪🇬 (EGP)" : "International Node 🌐 (USD)"}
+        {/* Region pill */}
+        <div className="mb-8 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[rgba(18,178,193,0.15)] bg-[rgba(18,178,193,0.05)] backdrop-blur-md">
+          <Globe className="w-3 h-3 text-[rgba(18,178,193,0.7)]" />
+          <span className="text-[10px] font-black text-[rgba(18,178,193,0.7)] uppercase tracking-[0.25em]">
+            {isEgypt ? t.regionEg : t.regionLb}
           </span>
         </div>
 
-        <h1 className="text-4xl lg:text-6xl font-black text-white mb-4 uppercase tracking-tighter">
-          Choose Your <span className="text-cyber-cyan">Path</span> 🚀
+        {/* Headline */}
+        <h1 className="text-5xl lg:text-6xl font-black text-white mb-4 tracking-tight leading-none">
+          {t.h1}<br />
+          <span style={{
+            background: "linear-gradient(135deg, rgba(18,178,193,1) 0%, rgba(86,158,193,1) 50%, rgba(224,197,143,0.9) 100%)",
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+          }}>{t.h2}</span>
         </h1>
+        <p className="text-[#e1ebed] text-sm mb-2 font-medium">{t.sub}</p>
 
-        <div className="flex items-center justify-center gap-2 mb-16 text-cyber-dim">
-          <Activity className="w-4 h-4 text-cyber-teal/50" />
-          <p className="text-xs font-bold uppercase tracking-widest">
-            Linked Entity: <span className="text-white">{userEmail}</span>
-          </p>
+        {/* User pill */}
+        <div className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 rounded-full bg-[rgba(86,108,158,0.08)] border border-[rgba(86,108,158,0.18)]">
+          <Activity className="w-3 h-3 text-[#e1ebed]" />
+          <span className="text-[11px] text-[#e1ebed]">
+            {t.loggedAs} <span className="text-[#E0C58F] font-semibold">{userEmail}</span>
+          </span>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto items-center">
-
-          {/* Free */}
-          <div className="bg-cyber-teal/8 backdrop-blur-xl p-10 rounded-[2.5rem] border border-white/8 hover:border-cyber-teal/20 transition-all duration-300 flex flex-col min-h-[450px] justify-between">
-            <div>
-              <Gift className="w-10 h-10 text-cyber-dim mb-6 mx-auto" />
-              <h3 className="text-xl font-black text-white uppercase tracking-tight">Free Trial</h3>
-              <p className="text-[10px] font-bold text-cyber-dim uppercase tracking-widest mt-2">Initial Intelligence Summary</p>
-              <div className="my-10 font-black text-4xl text-white tracking-tighter italic opacity-50">FREE</div>
+        {/* ── Referral discount banner ── */}
+        {hasReferral && (
+          <div className="mt-6 mb-2 inline-flex items-center gap-3 px-6 py-3.5 rounded-2xl border border-amber-500/30 bg-amber-500/5 backdrop-blur-sm">
+            <Gift className="w-5 h-5 text-amber-400 flex-shrink-0" />
+            <div className={isRtl ? "text-right" : "text-left"}>
+              <p className="text-[12px] font-black text-amber-400 uppercase tracking-wider">{t.referralBadge}</p>
+              <p className="text-[11px] text-amber-400/60 font-medium mt-0.5">{t.referralNote}</p>
             </div>
-            <button
-              onClick={handleFreePlan}
-              disabled={loading !== null}
-              className="w-full py-4 bg-white/5 border border-white/10 text-cyber-muted rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-white hover:text-black transition-all"
-            >
-              {loading === 'free' ? <Loader2 className="animate-spin mx-auto w-5 h-5" /> : "Initialize Summary"}
-            </button>
+          </div>
+        )}
+
+        {/* ── Payment error banner ── */}
+        {payError && (
+          <div className="mt-6 mb-2 px-5 py-3.5 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-400 text-[12px] font-bold text-center">
+            {payError}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════
+            Plan Cards  — AI Search | Premium | Gold
+        ══════════════════════════════════════ */}
+        <div className={`grid md:grid-cols-3 gap-5 items-center ${hasReferral ? "mt-8" : "mt-16"}`}>
+
+          {/* ── AI Search Pack ── */}
+          <div className="group relative rounded-3xl p-px transition-all duration-500 hover:-translate-y-1"
+            style={{ background: "linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))" }}>
+            <div className="rounded-3xl p-7 flex flex-col min-h-[480px] justify-between text-left"
+              style={{ background: "rgba(13,17,23,0.7)", backdropFilter: "blur(24px)" }}>
+              <div>
+                <div className="w-10 h-10 rounded-2xl flex items-center justify-center mb-5"
+                  style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <Zap className="w-4.5 h-4.5 text-[#e1ebed]" />
+                </div>
+                <p className="text-[10px] font-black text-[#e1ebed] uppercase tracking-[0.2em] mb-1">{t.aiPill}</p>
+                <h3 className="text-xl font-black text-white mb-1 tracking-tight">{t.aiTitle}</h3>
+                <p className="text-[#e1ebed] text-[12px] mb-6">{t.aiSub}</p>
+
+                {/* Price — fixed, no discount */}
+                <div className="mb-4 flex items-baseline gap-1">
+                  <span className="text-4xl font-black text-white">{BASE.ai_search}</span>
+                  <div className="flex flex-col items-start">
+                    <span className="text-[rgba(18,178,193,0.7)] text-sm font-bold">{t.currency}</span>
+                    <span className="text-[#e1ebed] text-[11px]">{t.oneTime}</span>
+                  </div>
+                </div>
+
+                {/* Coins — doubled if referral */}
+                <CoinsBadge coins={finalCoins("ai_search")} doubled={hasReferral} />
+
+                <ul className="space-y-2.5">
+                  {t.aiFeatures.map(f => (
+                    <li key={f} className="flex items-center gap-2.5 text-[#7A8FAA] text-[13px]">
+                      <CheckBullet color="teal" /> {f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <button onClick={() => handlePaidPlan("ai_search")} disabled={loading !== null}
+                className="mt-7 w-full py-3 rounded-2xl text-[12px] font-black uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-40"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#7A8FAA" }}
+                onMouseEnter={e => { const b = e.currentTarget as HTMLButtonElement; b.style.background = "rgba(255,255,255,0.09)"; b.style.color = "#F5F0E9"; b.style.borderColor = "rgba(255,255,255,0.15)"; }}
+                onMouseLeave={e => { const b = e.currentTarget as HTMLButtonElement; b.style.background = "rgba(255,255,255,0.04)"; b.style.color = "#7A8FAA"; b.style.borderColor = "rgba(255,255,255,0.08)"; }}
+              >
+                {loading === "ai_search" ? <Loader2 className="animate-spin w-4 h-4" /> : <>{t.btnAi} <ArrowRight className="w-4 h-4" /></>}
+              </button>
+            </div>
           </div>
 
-          {/* Premium */}
-          <div className="relative bg-cyber-teal/15 backdrop-blur-2xl p-10 lg:p-12 rounded-[3rem] border border-cyber-teal/35 transform lg:scale-110 shadow-[0_0_50px_rgba(13,138,158,0.18)] flex flex-col min-h-[500px] justify-between">
-            <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-cyber-teal text-white px-6 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl">
-              Most Integrated
-            </div>
-            <div>
-              <Star className="w-12 h-12 text-cyber-cyan mb-6 mx-auto drop-shadow-[0_0_10px_rgba(18,178,193,0.5)]" />
-              <h3 className="text-2xl font-black text-white uppercase tracking-tight">Premium</h3>
-              <p className="text-[10px] font-black text-cyber-cyan/60 uppercase tracking-[0.2em] mt-2">Complete Neural CV Build</p>
-              <div className="my-10 text-6xl font-black text-white tracking-tighter italic">
-                {isEgypt ? "50" : "2"}<span className="text-xs ml-2 opacity-50">{isEgypt ? "EGP" : "USD"}</span>
+          {/* ── Premium (featured, center) ── */}
+          <div className="group relative rounded-3xl p-px md:-translate-y-5 transition-all duration-500 hover:md:-translate-y-7"
+            style={{ background: "linear-gradient(145deg, rgba(18,178,193,0.5), rgba(18,178,193,0.1), rgba(86,108,158,0.3))" }}>
+            <div className="absolute inset-0 rounded-3xl pointer-events-none"
+              style={{ boxShadow: "0 0 80px rgba(18,178,193,0.15), 0 0 160px rgba(18,178,193,0.07)" }} />
+
+            <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-10">
+              <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.2em] text-white whitespace-nowrap"
+                style={{ background: "linear-gradient(135deg, rgba(18,178,193,1), rgba(13,110,130,1))", boxShadow: "0 4px 20px rgba(18,178,193,0.4)" }}>
+                <Sparkles className="w-2.5 h-2.5" /> {t.mostPopular}
               </div>
             </div>
-            <button
-              onClick={() => handlePaidPlan('premium')}
-              disabled={loading !== null}
-              className="w-full py-5 bg-cyber-teal text-white font-black rounded-2xl shadow-[0_0_25px_rgba(13,138,158,0.4)] flex justify-center items-center gap-3 hover:bg-cyber-cyan transition-all uppercase text-xs tracking-widest"
-            >
-              {loading === 'premium' ? <Loader2 className="animate-spin w-5 h-5" /> : <>Unlock Full CV <ArrowRight size={16} /></>}
-            </button>
+
+            <div className="rounded-3xl p-8 flex flex-col min-h-[540px] justify-between text-left"
+              style={{ background: "rgba(10,18,28,0.85)", backdropFilter: "blur(32px)" }}>
+              <div>
+                <div className="w-10 h-10 rounded-2xl flex items-center justify-center mb-5"
+                  style={{ background: "rgba(18,178,193,0.1)", border: "1px solid rgba(18,178,193,0.25)", boxShadow: "0 0 20px rgba(18,178,193,0.15)" }}>
+                  <ShieldCheck className="w-5 h-5 text-[rgba(18,178,193,0.9)]" />
+                </div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1" style={{ color: "rgba(18,178,193,0.6)" }}>{t.premPill}</p>
+                <h3 className="text-2xl font-black text-white mb-1 tracking-tight">{t.premTitle}</h3>
+                <p className="text-[12px] mb-6" style={{ color: "rgba(18,178,193,0.5)" }}>{t.premSub}</p>
+
+                {/* Price — with optional strikethrough */}
+                <div className="mb-4 flex items-baseline gap-2 flex-wrap">
+                  {hasReferral && (
+                    <span className="text-xl font-black line-through text-white/25">{BASE.premium}</span>
+                  )}
+                  <span className="text-5xl font-black text-white leading-none">{finalPrice("premium")}</span>
+                  <div className="flex flex-col items-start">
+                    <span className="text-[rgba(18,178,193,0.7)] text-sm font-bold">{t.currency}</span>
+                    <span className="text-[#e1ebed] text-[11px]">{t.oneTime}</span>
+                  </div>
+                </div>
+
+                <CoinsBadge coins={finalCoins("premium")} />
+
+                <ul className="space-y-2.5">
+                  {t.premFeatures.map(f => (
+                    <li key={f} className="flex items-center gap-2.5 text-[#C8BFBA] text-[13px]">
+                      <CheckBullet color="teal" /> {f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <button onClick={() => handlePaidPlan("premium")} disabled={loading !== null}
+                className="mt-7 w-full py-3.5 rounded-2xl text-[12px] font-black uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all duration-300 disabled:opacity-40"
+                style={{ background: "linear-gradient(135deg, rgba(18,178,193,1), rgba(13,130,150,1))", boxShadow: "0 4px 24px rgba(18,178,193,0.35)" }}
+                onMouseEnter={e => { const b = e.currentTarget as HTMLButtonElement; b.style.boxShadow = "0 6px 32px rgba(18,178,193,0.55)"; b.style.transform = "scale(1.01)"; }}
+                onMouseLeave={e => { const b = e.currentTarget as HTMLButtonElement; b.style.boxShadow = "0 4px 24px rgba(18,178,193,0.35)"; b.style.transform = "scale(1)"; }}
+              >
+                {loading === "premium" ? <Loader2 className="animate-spin w-5 h-5" /> : <>{t.btnPrem} <ArrowRight className="w-4 h-4" /></>}
+              </button>
+            </div>
           </div>
 
-          {/* Gold */}
-          <div className="bg-cyber-teal/8 backdrop-blur-xl p-10 rounded-[2.5rem] border border-white/8 hover:border-cyber-cyan/20 transition-all duration-300 flex flex-col min-h-[450px] justify-between">
-            <div>
-              <Crown className="w-10 h-10 text-cyber-cyan mb-6 mx-auto" />
-              <h3 className="text-xl font-black text-white uppercase tracking-tight">Gold Package</h3>
-              <p className="text-[10px] font-bold text-cyber-dim uppercase tracking-widest mt-2">Full Application Suite</p>
-              <div className="my-10 text-4xl font-black text-white tracking-tighter italic">
-                {isEgypt ? "250" : "5"}<span className="text-xs ml-2 opacity-50">{isEgypt ? "EGP" : "USD"}</span>
+          {/* ── Gold ── */}
+          <div className="group relative rounded-3xl p-px transition-all duration-500 hover:-translate-y-1"
+            style={{ background: "linear-gradient(145deg, rgba(224,197,143,0.25), rgba(224,197,143,0.05), rgba(255,255,255,0.03))" }}>
+            <div className="absolute inset-0 rounded-3xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+              style={{ boxShadow: "0 0 60px rgba(224,197,143,0.08)" }} />
+
+            <div className="rounded-3xl p-7 flex flex-col min-h-[480px] justify-between text-left"
+              style={{ background: "rgba(13,17,23,0.75)", backdropFilter: "blur(24px)" }}>
+              <div>
+                <div className="w-10 h-10 rounded-2xl flex items-center justify-center mb-5"
+                  style={{ background: "rgba(224,197,143,0.06)", border: "1px solid rgba(224,197,143,0.15)" }}>
+                  <Crown className="w-4.5 h-4.5 text-[#E0C58F] group-hover:drop-shadow-[0_0_8px_rgba(224,197,143,0.6)] transition-all" />
+                </div>
+                <p className="text-[10px] font-black text-[#E0C58F]/50 uppercase tracking-[0.2em] mb-1">{t.goldPill}</p>
+                <h3 className="text-xl font-black text-white mb-1 tracking-tight">{t.goldTitle}</h3>
+                <p className="text-[#e1ebed] text-[12px] mb-6">{t.goldSub}</p>
+
+                {/* Price — with optional strikethrough */}
+                <div className="mb-4 flex items-baseline gap-2 flex-wrap">
+                  {hasReferral && (
+                    <span className="text-xl font-black line-through text-white/25">{BASE.gold}</span>
+                  )}
+                  <span className="text-4xl font-black leading-none"
+                    style={{ background: "linear-gradient(135deg, #E0C58F, #c9a85c)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                    {finalPrice("gold")}
+                  </span>
+                  <div className="flex flex-col items-start">
+                    <span className="text-[#E0C58F]/60 text-sm font-bold">{t.currency}</span>
+                    <span className="text-[#e1ebed] text-[11px]">{t.oneTime}</span>
+                  </div>
+                </div>
+
+                <CoinsBadge coins={finalCoins("gold")} />
+
+                <ul className="space-y-2.5">
+                  {t.goldFeatures.map(f => (
+                    <li key={f} className="flex items-center gap-2.5 text-[#7A8FAA] text-[13px]">
+                      <CheckBullet color="gold" /> {f}
+                    </li>
+                  ))}
+                </ul>
               </div>
+
+              <button onClick={() => handlePaidPlan("gold")} disabled={loading !== null}
+                className="mt-7 w-full py-3 rounded-2xl text-[12px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-300 disabled:opacity-40"
+                style={{ background: "rgba(224,197,143,0.07)", border: "1px solid rgba(224,197,143,0.2)", color: "#E0C58F" }}
+                onMouseEnter={e => { const b = e.currentTarget as HTMLButtonElement; b.style.background = "rgba(224,197,143,0.14)"; b.style.borderColor = "rgba(224,197,143,0.4)"; b.style.boxShadow = "0 4px 20px rgba(224,197,143,0.1)"; }}
+                onMouseLeave={e => { const b = e.currentTarget as HTMLButtonElement; b.style.background = "rgba(224,197,143,0.07)"; b.style.borderColor = "rgba(224,197,143,0.2)"; b.style.boxShadow = "none"; }}
+              >
+                {loading === "gold" ? <Loader2 className="animate-spin w-4 h-4" /> : <>{t.btnGold} <ArrowRight className="w-4 h-4" /></>}
+              </button>
             </div>
-            <button
-              onClick={() => handlePaidPlan('gold')}
-              disabled={loading !== null}
-              className="w-full py-4 bg-cyber-cyan/10 border border-cyber-cyan/30 text-cyber-cyan rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-cyber-teal hover:text-white transition-all"
-            >
-              {loading === 'gold' ? <Loader2 className="animate-spin w-5 h-5" /> : "Deploy Gold Protocol"}
-            </button>
           </div>
 
         </div>
 
-        <div className="mt-24 flex justify-center items-center gap-10 opacity-30 grayscale pointer-events-none">
-          <div className="flex items-center gap-2"><Star size={14} /> <span className="text-[9px] font-black uppercase tracking-widest">Secure Checkout Architecture</span></div>
-          <div className="flex items-center gap-2"><Gift size={14} /> <span className="text-[9px] font-black uppercase tracking-widest">Instant Node Activation</span></div>
+        {/* Free trial text link */}
+        <button onClick={handleFreePlan} disabled={loading !== null}
+          className="mt-8 text-[12px] text-[#e1ebed]/40 hover:text-[#e1ebed]/70 font-medium underline underline-offset-4 transition-colors disabled:opacity-30 flex items-center gap-1.5 mx-auto"
+        >
+          {loading === "free" ? <Loader2 className="animate-spin w-3 h-3" /> : t.freeLink}
+        </button>
+
+        {/* ══════════════════════════════════════
+            Coin Economy Section
+        ══════════════════════════════════════ */}
+        <div className="mt-28">
+
+          {/* Section header */}
+          <div className="mb-10">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-amber-500/20 bg-amber-500/5 mb-5">
+              <Zap className="w-3 h-3 text-amber-400" />
+              <span className="text-[10px] font-black text-amber-400 uppercase tracking-[0.25em]">Coin Economy</span>
+            </div>
+            <h2 className="text-2xl lg:text-3xl font-black text-white tracking-tight mb-3">{t.coinTitle}</h2>
+            <p className="text-[#e1ebed] text-sm font-medium max-w-md mx-auto leading-relaxed">{t.coinSub}</p>
+          </div>
+
+          {/* Coin rows — 3 cards */}
+          <div className="grid md:grid-cols-3 gap-4">
+            {t.coinRows.map((row, i) => (
+              <div key={i}
+                className="group relative rounded-2xl p-6 text-left transition-all duration-300 hover:-translate-y-1 overflow-hidden"
+                style={{ background: "rgba(13,17,23,0.7)", border: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(20px)" }}
+              >
+                {/* Top accent on hover */}
+                <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(18,178,193,0.4)] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                <div className="flex items-center justify-between mb-5">
+                  {/* Cost badge */}
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg"
+                    style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
+                    <Zap className="w-3 h-3 text-amber-400" />
+                    <span className="text-[11px] font-black text-amber-400 uppercase tracking-wider">{row.cost}</span>
+                  </div>
+                  {/* Action icon */}
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-[rgba(18,178,193,0.6)]"
+                    style={{ background: "rgba(18,178,193,0.06)", border: "1px solid rgba(18,178,193,0.12)" }}>
+                    {coinIcon(row.icon)}
+                  </div>
+                </div>
+
+                <h3 className="text-[15px] font-black text-white mb-2 tracking-tight leading-snug">{row.action}</h3>
+                <p className="text-[12px] text-[#7A8FAA] leading-relaxed font-medium">{row.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Trust bar ── */}
+        <div className="mt-16 flex flex-wrap justify-center items-center gap-6">
+          {[
+            { icon: ShieldCheck, text: t.trustSecure },
+            { icon: Zap,         text: t.trustInstant },
+            { icon: Globe,       text: t.trustOnce },
+          ].map(({ icon: Icon, text }, i) => (
+            <div key={text} className="flex items-center gap-2">
+              {i > 0 && <div className="w-px h-3 bg-[rgba(86,108,158,0.2)] mr-4" />}
+              <Icon className="w-3 h-3 text-[#e1ebed]/50" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#e1ebed]/40">{text}</span>
+            </div>
+          ))}
         </div>
 
       </div>

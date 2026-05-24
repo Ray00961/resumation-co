@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Sparkles, MapPin, Briefcase, GraduationCap,
   Loader2, AlertCircle, ExternalLink, Copy, CheckCheck,
   Globe, Zap, Mail, Phone,
 } from "lucide-react";
-import { supabase } from "../supabase";
 import { useLang } from "../context/LanguageContext";
 
 interface ExpItem { title: string; company: string; duration: string; description: string; }
@@ -45,9 +44,9 @@ export default function UserProfile() {
 
   const t = {
     en: {
-      notFound:    "Profile not found",
+      notFound:     "Profile not found",
       notFoundSub: "This username doesn't exist on Resumation.co",
-      backHome:    "Back to Home",
+      backHome:     "Back to Home",
       member:      "Resumation.co Member",
       joinedOn:    "Joined",
       regions:     { EG: "Egypt 🇪🇬", LB: "Lebanon 🇱🇧" },
@@ -60,9 +59,9 @@ export default function UserProfile() {
       contact:     "Contact",
     },
     ar: {
-      notFound:    "الملف الشخصي غير موجود",
+      notFound:     "الملف الشخصي غير موجود",
       notFoundSub: "اسم المستخدم هذا غير موجود على Resumation.co",
-      backHome:    "العودة للرئيسية",
+      backHome:     "العودة للرئيسية",
       member:      "عضو في Resumation.co",
       joinedOn:    "انضم في",
       regions:     { EG: "مصر 🇪🇬", LB: "لبنان 🇱🇧" },
@@ -83,34 +82,59 @@ export default function UserProfile() {
 
   const fetchProfile = async () => {
     setLoading(true);
+    setNotFound(false);
     try {
-      const { data, error } = await supabase
-        .rpc("get_public_profile", { p_username: username });
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+      const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-      if (error || !data) { setNotFound(true); return; }
+      // الـ RPC endpoint كـ Direct Fetch لعدم تعليق الـ session للزوار من برا
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_public_profile`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ p_username: username }),
+      });
+
+      if (!response.ok) {
+        setNotFound(true);
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!data || (Array.isArray(data) && data.length === 0)) {
+        setNotFound(true);
+        return;
+      }
+
+      const profileData = Array.isArray(data) ? data[0] : data;
 
       setProfile({
-        id:         data.id,
-        first_name: data.first_name ?? null,
-        last_name:  data.last_name  ?? null,
-        username:   data.username   ?? null,
-        region:     data.region     ?? null,
-        target_job: data.target_job ?? null,
-        created_at: data.created_at ?? null,
-        avatar_url: data.avatar_url ?? null,
-        cover_url:  data.cover_url  ?? null,
-        headline:   data.headline   ?? null,
-        about:      data.about      ?? null,
-        ai_summary: data.ai_summary ?? null,
-        skills:     Array.isArray(data.skills)     ? data.skills     : null,
-        experience: Array.isArray(data.experience) ? data.experience : null,
-        education:  Array.isArray(data.education)  ? data.education  : null,
-        location:   data.location   ?? null,
-        website:    data.website    ?? null,
-        phone:      data.phone      ?? null,
-        email:      data.email      ?? null,
+        id:          profileData.id,
+        first_name:  profileData.first_name ?? null,
+        last_name:   profileData.last_name  ?? null,
+        username:    profileData.username   ?? null,
+        region:      profileData.region     ?? null,
+        target_job:  profileData.target_job ?? null,
+        created_at:  profileData.created_at ?? null,
+        avatar_url:  profileData.avatar_url ?? null,
+        cover_url:   profileData.cover_url  ?? null,
+        headline:    profileData.headline   ?? null,
+        about:       profileData.about      ?? null,
+        ai_summary:  profileData.ai_summary ?? null,
+        skills:      Array.isArray(profileData.skills)     ? profileData.skills     : null,
+        experience:  Array.isArray(profileData.experience) ? profileData.experience : null,
+        education:   Array.isArray(profileData.education)  ? profileData.education  : null,
+        location:    profileData.location   ?? null,
+        website:     profileData.website    ?? null,
+        phone:       profileData.phone      ?? null,
+        email:       profileData.email      ?? null,
       });
-    } catch {
+    } catch (err) {
+      console.error("Public profile fetch error:", err);
       setNotFound(true);
     } finally {
       setLoading(false);
@@ -141,7 +165,7 @@ export default function UserProfile() {
   };
 
   const sectionTitle = (label: string) => (
-    <h2 className="text-[11px] font-bold text-[#E0C58F] uppercase tracking-widest mb-5">{label}</h2>
+    <h2 className="text-[12px] font-bold text-[#E0C58F] uppercase tracking-widest mb-5">{label}</h2>
   );
 
   if (loading) return (
@@ -156,7 +180,7 @@ export default function UserProfile() {
       dir={isRtl ? "rtl" : "ltr"}
       style={{ fontFamily: isRtl ? "'Tajawal', sans-serif" : "'Plus Jakarta Sans', sans-serif" }}
     >
-      <AlertCircle className="w-12 h-12 text-[#566C9E] mb-5" />
+      <AlertCircle className="w-12 h-12 text-[#e1ebed] mb-5" />
       <h1 className="text-2xl font-bold text-[#F5F0E9] mb-2">{t.notFound}</h1>
       <p className="text-sm text-[#A8B4CC] mb-8">@{username} — {t.notFoundSub}</p>
       <button
@@ -232,8 +256,8 @@ export default function UserProfile() {
 
             {/* الـ username + شارة */}
             <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <span className="text-sm text-[#566C9E] font-mono">@{profile?.username}</span>
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-[rgba(18,178,193,0.08)] border border-[#12B2C1]/15 text-[#12B2C1]">
+              <span className="text-sm text-[#e1ebed] font-mono">@{profile?.username}</span>
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[rgba(18,178,193,0.08)] border border-[#12B2C1]/15 text-[#12B2C1]">
                 <Sparkles className="w-2.5 h-2.5" /> {t.member}
               </span>
             </div>
@@ -244,7 +268,7 @@ export default function UserProfile() {
             )}
 
             {/* الموقع والموقع الإلكتروني وتاريخ الانضمام */}
-            <div className="flex flex-wrap gap-4 text-xs text-[#566C9E] mb-4">
+            <div className="flex flex-wrap gap-4 text-xs text-[#e1ebed] mb-4">
               {profile?.location && (
                 <span className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5"/>{profile.location}</span>
               )}
@@ -276,7 +300,7 @@ export default function UserProfile() {
             {profile?.skills && profile.skills.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {profile.skills.slice(0, 12).map(s => (
-                  <span key={s} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium text-[#12B2C1]"
+                  <span key={s} className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[12px] font-medium text-[#12B2C1]"
                     style={{ background:"rgba(18,178,193,0.07)", border:"1px solid rgba(18,178,193,0.15)" }}>
                     <Zap className="w-2.5 h-2.5"/>{s}
                   </span>
@@ -286,7 +310,7 @@ export default function UserProfile() {
           </div>
         </div>
 
-        {/* ── التواصل (بس إذا عام) ── */}
+        {/* ── التواصل ── */}
         {hasContact && (
           <div className="rounded-2xl p-5 sm:p-6" style={cardStyle}>
             {sectionTitle(t.contact)}
@@ -324,12 +348,12 @@ export default function UserProfile() {
                 <div key={i} className="flex gap-4 pb-5 border-b border-[rgba(60,80,125,0.1)] last:border-0 last:pb-0">
                   <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
                     style={{ background:"rgba(60,80,125,0.1)", border:"1px solid rgba(60,80,125,0.2)" }}>
-                    <Briefcase className="w-4 h-4 text-[#566C9E]"/>
+                    <Briefcase className="w-4 h-4 text-[#e1ebed]"/>
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-bold text-[#F5F0E9]">{exp.title}</h3>
                     <p className="text-xs text-[#12B2C1] font-medium mt-0.5">{exp.company}</p>
-                    {exp.duration && <p className="text-[11px] text-[#566C9E] mt-0.5 mb-2 font-mono">{exp.duration}</p>}
+                    {exp.duration && <p className="text-[12px] text-[#e1ebed] mt-0.5 mb-2 font-mono">{exp.duration}</p>}
                     {exp.description && <p className="text-xs text-[#A8B4CC] leading-[1.8]">{exp.description}</p>}
                   </div>
                 </div>
@@ -347,13 +371,13 @@ export default function UserProfile() {
                 <div key={i} className="flex gap-4 pb-5 border-b border-[rgba(60,80,125,0.1)] last:border-0 last:pb-0">
                   <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
                     style={{ background:"rgba(60,80,125,0.1)", border:"1px solid rgba(60,80,125,0.2)" }}>
-                    <GraduationCap className="w-4 h-4 text-[#566C9E]"/>
+                    <GraduationCap className="w-4 h-4 text-[#e1ebed]"/>
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-bold text-[#F5F0E9]">{edu.degree}</h3>
                     {edu.major && <p className="text-xs text-[#E0C58F] font-medium mt-0.5">{edu.major}</p>}
                     <p className="text-xs text-[#12B2C1] font-medium mt-0.5">{edu.institution}</p>
-                    {edu.year && <p className="text-[11px] text-[#566C9E] mt-0.5 font-mono">{edu.year}</p>}
+                    {edu.year && <p className="text-[12px] text-[#e1ebed] mt-0.5 font-mono">{edu.year}</p>}
                   </div>
                 </div>
               ))}
@@ -375,7 +399,7 @@ export default function UserProfile() {
           </a>
         </div>
 
-        <p className="text-center text-[10px] text-[#3C507D] font-mono tracking-widest uppercase">
+        <p className="text-center text-[11px] text-[#3C507D] font-mono tracking-widest uppercase">
           {t.poweredBy}
         </p>
 

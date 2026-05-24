@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CheckCircle, Loader2, ArrowRight, Mail, Hash, FileText, Activity, ShieldCheck } from "lucide-react";
 import { motion } from "framer-motion";
@@ -21,66 +21,66 @@ export default function SuccessPage() {
       const { data: { session } } = await supabase.auth.getSession();
 
       if (session?.user) {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('submission_id')
-          .eq('id', session.user.id)
-          .single();
+        // Fetch latest submission_id from cv_archive (source of truth)
+        const { data: arcData } = await supabase
+          .from("cv_archive")
+          .select("submission_id")
+          .eq("user_id", session.user.id)
+          .order("id", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
         setCurrentUser({
-          id: session.user.id,
-          email: session.user.email || "",
-          sid: userData?.submission_id || "NOT_FOUND"
+          id:    session.user.id,
+          email: session.user.email || session.user.user_metadata?.email || "",
+          sid:   arcData?.submission_id || "NOT_FOUND",
         });
+
+        // Plan is NOT read from URL — it comes from the DB via confirm-payment
+        // Just keep a display label for the UI
+        setPlanName("Your Package");
       } else {
         navigate("/login");
       }
-
-      if (merchantRef.includes("GOLD") || amountCents === "25000") {
-        setPlanName("Gold Package");
-      } else {
-        setPlanName("Premium Package");
-      }
     };
     fetchData();
-  }, [merchantRef, amountCents, navigate]);
+  }, [navigate]);
 
   const handleGetPackage = async () => {
     if (!currentUser) return;
     setLoading(true);
 
-    const webhookUrl = "https://hook.eu1.make.com/w1nmxyrd786vy4pv8exdba5vy58i1mnm";
-    const detectedPlan = planName.toLowerCase().includes("gold") ? "gold" : "premium";
+    const efUrl = import.meta.env.VITE_EF_CONFIRM_PAYMENT as string | undefined;
 
     try {
-      const { error } = await supabase
-        .from('users')
-        .update({
-          selected_plan: detectedPlan,
-          payment_status: true
-        })
-        .eq('id', currentUser.id);
+      if (efUrl && currentUser.sid && currentUser.sid !== "NOT_FOUND") {
+        // Get fresh JWT token to authenticate the request
+        const { data: { session } } = await supabase.auth.getSession();
+        const accessToken = session?.access_token;
 
-      if (error) throw error;
+        if (!accessToken) { navigate("/login"); return; }
 
-      await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: currentUser.id,
-          login_email: currentUser.email,
-          submission_id: currentUser.sid,
-          paymob_order_id: paymobOrderId,
-          plan: detectedPlan,
-          amount: amountCents,
-          status: "confirmed"
-        }),
-      });
+        await fetch(efUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type":  "application/json",
+            "Authorization": `Bearer ${accessToken}`,   // ← JWT يُرسل هنا
+          },
+          body: JSON.stringify({
+            // user_id و plan لا يُرسلان — يُحدَّدان من الـ JWT والـ DB
+            submission_id:   currentUser.sid,
+            paymob_order_id: paymobOrderId,
+            amount:          amountCents,
+          }),
+        });
+      }
 
       setTimeout(() => navigate("/package-access"), 1500);
     } catch (error) {
       console.error("Update Error:", error);
       navigate("/package-access");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -106,14 +106,14 @@ export default function SuccessPage() {
             <h1 className="text-3xl font-black text-white uppercase tracking-tighter mb-2">Protocol <span className="text-emerald-400">Verified</span></h1>
             <div className="flex items-center justify-center gap-2 mb-8">
               <Activity className="w-3 h-3 text-emerald-500 animate-pulse" />
-              <span className="text-[10px] font-black text-cyber-dim uppercase tracking-[0.3em]">Transaction Secured</span>
+              <span className="text-[11px] font-black text-cyber-dim uppercase tracking-[0.3em]">Transaction Secured</span>
             </div>
 
             <div className="bg-[rgba(31,43,45,0.6)] rounded-2xl p-6 mb-10 text-left border border-white/5 space-y-5">
               <div className="flex items-start gap-4 border-b border-white/5 pb-4">
                 <Mail className="w-4 h-4 text-cyber-cyan mt-1" />
                 <div className="overflow-hidden">
-                  <p className="text-[9px] uppercase text-cyber-dim font-black tracking-widest mb-1">Entity Linked</p>
+                  <p className="text-[10px] uppercase text-cyber-dim font-black tracking-widest mb-1">Entity Linked</p>
                   <p className="text-sm font-bold text-slate-200 truncate">{currentUser?.email}</p>
                 </div>
               </div>
@@ -121,7 +121,7 @@ export default function SuccessPage() {
               <div className="flex items-start gap-4 border-b border-white/5 pb-4">
                 <FileText className="w-4 h-4 text-emerald-400 mt-1" />
                 <div>
-                  <p className="text-[9px] uppercase text-cyber-dim font-black tracking-widest mb-1">Trace ID (SID)</p>
+                  <p className="text-[10px] uppercase text-cyber-dim font-black tracking-widest mb-1">Trace ID (SID)</p>
                   <p className="text-sm font-black text-white tracking-widest">{currentUser?.sid}</p>
                 </div>
               </div>
@@ -129,7 +129,7 @@ export default function SuccessPage() {
               <div className="flex items-start gap-4">
                 <Hash className="w-4 h-4 text-cyber-cyan mt-1" />
                 <div>
-                  <p className="text-[9px] uppercase text-cyber-dim font-black tracking-widest mb-1">Payment Hash</p>
+                  <p className="text-[10px] uppercase text-cyber-dim font-black tracking-widest mb-1">Payment Hash</p>
                   <p className="text-sm font-bold text-cyber-cyan font-mono tracking-tighter">{paymobOrderId}</p>
                 </div>
               </div>
@@ -150,7 +150,7 @@ export default function SuccessPage() {
         ) : (
           <div className="py-20 text-center">
             <Loader2 className="w-12 h-12 animate-spin text-cyber-cyan mx-auto mb-6 shadow-[0_0_20px_rgba(13,138,158,0.1)]" />
-            <p className="text-cyber-cyan font-black uppercase tracking-[0.4em] text-[10px]">Updating Carrier Nodes...</p>
+            <p className="text-cyber-cyan font-black uppercase tracking-[0.4em] text-[11px]">Updating Carrier Nodes...</p>
           </div>
         )}
       </motion.div>

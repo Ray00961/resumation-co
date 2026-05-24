@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabase";
 import { useLang } from "../context/LanguageContext";
@@ -191,42 +191,79 @@ export default function Profile() {
 
   // ── Fetch ──
   useEffect(() => {
-    // Safety net: never stay stuck on loading forever
-    const safetyTimer = setTimeout(() => setLoading(false), 10000);
-
     const init = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) { navigate("/login"); return; }
-        setEmail(session.user.email ?? "");
-        setUserId(session.user.id);
+      // 1. Read session from localStorage immediately (synchronous)
+      let uid = "";
+      let userEmail = "";
+      let avatarFallback = "";
+      let googleName = "";
 
-        // Fetch users and profiles in parallel, each with its own fallback
+      const lsKey = Object.keys(localStorage).find(
+        k => k.startsWith("sb-") && k.endsWith("-auth-token")
+      );
+      if (lsKey) {
+        try {
+          const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+          if (cached?.user?.id) {
+            uid            = cached.user.id;
+            userEmail      = cached.user.email ?? "";
+            avatarFallback = cached.user.user_metadata?.avatar_url ?? "";
+            googleName     = cached.user.user_metadata?.full_name  ?? "";
+          }
+        } catch { }
+      }
+
+      if (!uid) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) { window.location.replace("/login"); return; }
+          uid            = session.user.id;
+          userEmail      = session.user.email ?? "";
+          avatarFallback = session.user.user_metadata?.avatar_url ?? "";
+          googleName     = session.user.user_metadata?.full_name  ?? "";
+        } catch { window.location.replace("/login"); return; }
+      }
+
+      // 2. Show page immediately from Google metadata — no wait
+      setEmail(userEmail);
+      setUserId(uid);
+      if (googleName) {
+        const parts = googleName.trim().split(" ");
+        setData(d => ({
+          ...d,
+          first_name: parts[0] || "",
+          last_name:  parts.slice(1).join(" ") || "",
+          avatar_url: avatarFallback,
+        }));
+      }
+      setLoading(false); // page appears instantly
+
+      // 3. Fetch DB data using direct fetch — bypasses Supabase JS getSession() which hangs
+      try {
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+        const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+        const accessToken = (lsKey ? JSON.parse(localStorage.getItem(lsKey) || "null") : null)?.access_token ?? null;
+        const authHeader = accessToken ? `Bearer ${accessToken}` : `Bearer ${SUPABASE_KEY}`;
+
         const [uRes, pRes] = await Promise.all([
-          supabase.from("users")
-            .select("first_name,last_name,username,region")
-            .eq("id", session.user.id)
-            .maybeSingle(),
-          supabase.from("profiles")
-            .select("headline,location,website,phone,phone_public,email_public,about,ai_summary,target_jobs,skills,experience,education,avatar_url,cover_url,cover_position,avatar_position")
-            .eq("id", session.user.id)
-            .maybeSingle(),
+          fetch(`${SUPABASE_URL}/rest/v1/users?id=eq.${uid}&select=first_name,last_name,username,region`, {
+            headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader },
+          }).then(r => r.json()),
+          fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}&select=username,first_name,last_name,headline,location,website,phone,phone_public,email_public,about,ai_summary,target_jobs,skills,experience,education,avatar_url,cover_url,cover_position,avatar_position`, {
+            headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader },
+          }).then(r => r.json()),
         ]);
 
-        const u = uRes.data;
-        const p = pRes.data;
+        const u = Array.isArray(uRes) ? uRes[0] ?? null : null;
+        const p = Array.isArray(pRes) ? pRes[0] ?? null : null;
 
-        // If no users row found → profile setup was never completed → redirect to login/setup
-        if (!u) {
-          navigate("/login");
-          return;
-        }
+        if (!u && !p) { window.location.replace("/login"); return; }
 
         setData({
-          first_name:      u.first_name  ?? "",
-          last_name:       u.last_name   ?? "",
-          username:        u.username    ?? "",
-          region:          u.region      ?? "",
+          first_name:      u?.first_name  ?? p?.first_name  ?? googleName.split(" ")[0] ?? "",
+          last_name:       u?.last_name   ?? p?.last_name   ?? googleName.split(" ").slice(1).join(" ") ?? "",
+          username:        u?.username    ?? p?.username    ?? "",
+          region:          u?.region      ?? "",
           headline:        p?.headline    ?? "",
           location:        p?.location    ?? "",
           website:         p?.website     ?? "",
@@ -239,30 +276,22 @@ export default function Profile() {
           skills:          Array.isArray(p?.skills)      ? p.skills      : [],
           experience:      Array.isArray(p?.experience)  ? p.experience  : [],
           education:       Array.isArray(p?.education)   ? p.education   : [],
-          // avatar: prefer saved URL, fallback to Google profile photo
-          avatar_url:      (p?.avatar_url && p.avatar_url !== "")
-                             ? p.avatar_url
-                             : (session.user.user_metadata?.avatar_url ?? ""),
+          avatar_url:      (p?.avatar_url && p.avatar_url !== "") ? p.avatar_url : avatarFallback,
           cover_url:       p?.cover_url       ?? "",
           cover_position:  p?.cover_position  ?? "50% 50%",
           avatar_position: p?.avatar_position ?? "50% 50%",
         });
-      // جيب الإحصائيات بشكل مستقل
-      supabase.from("cv_archive")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", session.user.id)
-        .then(({ count }) => setCvCount(count ?? 0));
 
-      supabase.from("cv_analysis_requests")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", session.user.id)
-        .then(({ count }) => setAnalysisCount(count ?? 0));
+        // 4. Stats in background (non-critical)
+        fetch(`${SUPABASE_URL}/rest/v1/cv_archive?user_id=eq.${uid}&select=id`, {
+          headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader, "Prefer": "count=exact" },
+        }).then(r => { const c = r.headers.get("content-range"); setCvCount(c ? parseInt(c.split("/")[1]) : 0); });
+        fetch(`${SUPABASE_URL}/rest/v1/cv_analysis_requests?user_id=eq.${uid}&select=id`, {
+          headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader, "Prefer": "count=exact" },
+        }).then(r => { const c = r.headers.get("content-range"); setAnalysisCount(c ? parseInt(c.split("/")[1]) : 0); });
 
       } catch (err) {
-        console.error("Profile fetch error:", err);
-      } finally {
-        clearTimeout(safetyTimer);
-        setLoading(false);
+        console.error("Profile DB fetch error:", err);
       }
     };
 
@@ -271,15 +300,38 @@ export default function Profile() {
 
   // ── Photo upload ──
   const uploadPhoto = async (file: File, bucket: 'avatars' | 'covers', field: 'avatar_url' | 'cover_url') => {
-    if (!userId) return;
-    const ext = file.name.split('.').pop();
-    const path = `${userId}/${bucket === 'avatars' ? 'avatar' : 'cover'}.${ext}`;
-    const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
-    if (error) { toast.error(t.uploadFail); return; }
-    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(path);
-    setData(d => ({ ...d, [field]: publicUrl }));
-    await supabase.from('profiles').upsert({ id: userId, [field]: publicUrl }, { onConflict: 'id' });
-    toast.success(t.photoUpdated);
+    if (!userId) { toast.error("Not logged in"); return; }
+    try {
+      const ext = file.name.split('.').pop() ?? "jpg";
+      const path = `${userId}/${bucket === 'avatars' ? 'avatar' : 'cover'}.${ext}`;
+      const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true });
+      if (error) {
+        console.error("Upload error:", error);
+        toast.error(`${t.uploadFail}: ${error.message}`);
+        return;
+      }
+      const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(path);
+      setData(d => ({ ...d, [field]: publicUrl }));
+      // Direct Fetch — no SDK (getSession() hangs)
+      const lsKey2 = Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token"));
+      const token2 = lsKey2 ? (JSON.parse(localStorage.getItem(lsKey2) || "null")?.access_token ?? null) : null;
+      const SUPABASE_URL2 = import.meta.env.VITE_SUPABASE_URL as string;
+      const SUPABASE_KEY2 = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+      await fetch(`${SUPABASE_URL2}/rest/v1/profiles`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY2,
+          "Authorization": `Bearer ${token2 ?? SUPABASE_KEY2}`,
+          "Content-Type": "application/json",
+          "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify({ id: userId, [field]: publicUrl }),
+      });
+      toast.success(t.photoUpdated);
+    } catch (err: any) {
+      console.error("Upload exception:", err);
+      toast.error(t.uploadFail);
+    }
   };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -294,14 +346,27 @@ export default function Profile() {
 
   // ── Save ──
   const handleSave = async () => {
+    if (!userId) { toast.error("Not logged in"); return; }
     setSaving(true);
-    const [uErr, pErr] = await Promise.all([
-      supabase.from("users").upsert({
-        id: userId, first_name: data.first_name, last_name: data.last_name,
-        username: data.username,
-      }, { onConflict: "id" }).then(r => r.error),
-      supabase.from("profiles").upsert({
+    try {
+      // Read token directly from localStorage — bypasses Supabase internal getSession() which hangs
+      const lsKey = Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token"));
+      const cached = lsKey ? JSON.parse(localStorage.getItem(lsKey) || "null") : null;
+      const accessToken: string | null = cached?.access_token ?? null;
+      console.log("🔑 Token from localStorage:", accessToken ? "found" : "missing");
+
+      if (!accessToken) {
+        toast.error("Session expired. Please log in again.");
+        navigate("/login");
+        return;
+      }
+
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+      const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+      const payload = {
         id: userId,
+        first_name: data.first_name, last_name: data.last_name, username: data.username,
         headline: data.headline, location: data.location, website: data.website,
         phone: data.phone, phone_public: data.phone_public, email_public: data.email_public,
         about: data.about, ai_summary: data.ai_summary,
@@ -309,14 +374,52 @@ export default function Profile() {
         education: data.education,
         avatar_url: data.avatar_url, cover_url: data.cover_url,
         cover_position: data.cover_position, avatar_position: data.avatar_position,
-        username: data.username, last_name: data.last_name,
         updated_at: new Date().toISOString(),
-      }, { onConflict: "id" }).then(r => r.error),
-    ]);
-    setSaving(false);
-    if (uErr || pErr) { toast.error(t.errorMsg); return; }
-    toast.success(t.savedMsg);
-    setEdit(false);
+      };
+
+      console.log("📦 Sending direct fetch upsert...");
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      console.log("✅ Fetch done — status:", res.status);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error("❌ Save error:", errText);
+        toast.error(`${t.errorMsg}: ${errText}`);
+        return;
+      }
+
+      // non-blocking users table update
+      fetch(`${SUPABASE_URL}/rest/v1/users`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify({
+          id: userId, first_name: data.first_name,
+          last_name: data.last_name, username: data.username,
+        }),
+      }).then(r => { if (!r.ok) r.text().then(e => console.warn("users update failed:", e)); });
+
+      toast.success(t.savedMsg);
+      setEdit(false);
+    } catch (err: any) {
+      console.error("💥 Save exception:", err);
+      toast.error(t.errorMsg);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── AI: Generate Summary ──
@@ -389,7 +492,7 @@ export default function Profile() {
   const fullName = [data.first_name, data.last_name].filter(Boolean).join(" ") || "—";
   const initials = [data.first_name?.[0], data.last_name?.[0]].filter(Boolean).join("").toUpperCase() || "?";
 
-  const inp = "w-full bg-[rgba(60,80,125,0.06)] border border-[rgba(60,80,125,0.2)] rounded-lg px-3 py-2.5 text-sm text-[#F5F0E9] outline-none focus:border-[#12B2C1]/50 transition-colors placeholder-[#566C9E]";
+  const inp = "w-full bg-[rgba(60,80,125,0.06)] border border-[rgba(60,80,125,0.2)] rounded-lg px-3 py-2.5 text-sm text-[#F5F0E9] outline-none focus:border-[#12B2C1]/50 transition-colors placeholder-[#e1ebed]";
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-[#0D1117]">
@@ -447,14 +550,14 @@ export default function Profile() {
                   <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1 rounded-full pointer-events-none"
                     style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)" }}>
                     <Move className="w-3 h-3 text-white/80" />
-                    <span className="text-[10px] text-white/80 font-medium whitespace-nowrap">
+                    <span className="text-[11px] text-white/80 font-medium whitespace-nowrap">
                       {isRtl ? "اسحب لإعادة التموضع" : "Drag to reposition"}
                     </span>
                   </div>
                 )}
                 <button
                   onClick={(e) => { e.stopPropagation(); coverInputRef.current?.click(); }}
-                  className="absolute top-2 right-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-white hover:bg-black/70 transition-colors"
+                  className="absolute top-2 right-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-white hover:bg-black/70 transition-colors"
                   style={{ background: "rgba(0,0,0,0.50)", backdropFilter: "blur(6px)" }}
                 >
                   <Camera className="w-3.5 h-3.5" />
@@ -505,13 +608,13 @@ export default function Profile() {
                 {!editMode && data.username && (
                   <>
                     <button onClick={copyLink}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all"
                       style={{ background:"rgba(60,80,125,0.08)", border:"1px solid rgba(60,80,125,0.2)", color: copied ? "#34d399":"#A8B4CC" }}>
                       {copied ? <CheckCheck className="w-3 h-3"/> : <Copy className="w-3 h-3"/>}
                       {copied ? t.copied : t.copyLink}
                     </button>
                     <button onClick={() => navigate(`/u/${data.username}`)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-[#12B2C1] transition-all hover:text-[#F5F0E9]"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[#12B2C1] transition-all hover:text-[#F5F0E9]"
                       style={{ background:"rgba(18,178,193,0.06)", border:"1px solid rgba(18,178,193,0.15)" }}>
                       <ExternalLink className="w-3 h-3"/> {t.viewPublic}
                     </button>
@@ -520,26 +623,26 @@ export default function Profile() {
                 {/* My Account button */}
                 {!editMode && (
                   <Link to="/account"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-[#A8B4CC] hover:text-[#F5F0E9] transition-all"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[#A8B4CC] hover:text-[#F5F0E9] transition-all"
                     style={{ background:"rgba(60,80,125,0.06)", border:"1px solid rgba(60,80,125,0.15)" }}>
                     <UserCog className="w-3 h-3"/> {t.myAccount}
                   </Link>
                 )}
                 {!editMode ? (
                   <button onClick={() => setEdit(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-[#A8B4CC] hover:text-[#F5F0E9] transition-all"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold text-[#A8B4CC] hover:text-[#F5F0E9] transition-all"
                     style={{ background:"rgba(60,80,125,0.08)", border:"1px solid rgba(60,80,125,0.2)" }}>
                     <Edit3 className="w-3 h-3"/> {t.editBtn}
                   </button>
                 ) : (
                   <div className="flex gap-2">
                     <button onClick={() => setEdit(false)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-[#A8B4CC] transition-all"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[#A8B4CC] transition-all"
                       style={{ background:"rgba(60,80,125,0.06)", border:"1px solid rgba(60,80,125,0.15)" }}>
                       <X className="w-3 h-3"/> {t.cancelBtn}
                     </button>
                     <button onClick={handleSave} disabled={saving}
-                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[11px] font-bold text-[#0D1117] transition-all disabled:opacity-60"
+                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-bold text-[#0D1117] transition-all disabled:opacity-60"
                       style={{ background:"linear-gradient(135deg,#12B2C1,#0E8F9C)" }}>
                       {saving ? <Loader2 className="w-3 h-3 animate-spin"/> : <Save className="w-3 h-3"/>}
                       {saving ? t.savingMsg : t.saveBtn}
@@ -551,9 +654,21 @@ export default function Profile() {
 
             {/* Name */}
             {editMode ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                <input value={data.first_name} onChange={e => setData(d=>({...d,first_name:e.target.value}))} className={inp} placeholder={isRtl?"الاسم الأول":"First name"} />
-                <input value={data.last_name}  onChange={e => setData(d=>({...d,last_name:e.target.value}))}  className={inp} placeholder={isRtl?"اسم العائلة":"Last name"} />
+              <div className="space-y-3 mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input value={data.first_name} onChange={e => setData(d=>({...d,first_name:e.target.value}))} className={inp} placeholder={isRtl?"الاسم الأول":"First name"} />
+                  <input value={data.last_name}  onChange={e => setData(d=>({...d,last_name:e.target.value}))}  className={inp} placeholder={isRtl?"اسم العائلة":"Last name"} />
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[#e1ebed] select-none">@</span>
+                  <input
+                    value={data.username}
+                    onChange={e => setData(d=>({...d, username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,"")}))}
+                    className={`${inp} pl-7 font-mono`}
+                    placeholder={isRtl ? "اسم المستخدم" : "username"}
+                    dir="ltr"
+                  />
+                </div>
               </div>
             ) : (
               <h1 className="text-xl font-bold text-[#F5F0E9] mb-1">{fullName}</h1>
@@ -562,8 +677,8 @@ export default function Profile() {
             {/* Username */}
             {data.username && !editMode && (
               <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <span className="text-sm text-[#566C9E] font-mono">@{data.username}</span>
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-[rgba(18,178,193,0.07)] border border-[#12B2C1]/15 text-[#12B2C1]">
+                <span className="text-sm text-[#e1ebed] font-mono">@{data.username}</span>
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[rgba(18,178,193,0.07)] border border-[#12B2C1]/15 text-[#12B2C1]">
                   <Sparkles className="w-2.5 h-2.5"/> Resumation Member
                 </span>
               </div>
@@ -581,18 +696,18 @@ export default function Profile() {
             {editMode ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#566C9E]"/>
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#e1ebed]"/>
                   <input value={data.location} onChange={e => setData(d=>({...d,location:e.target.value}))}
                     className={`${inp} pl-8`} placeholder={isRtl?"المدينة، الدولة":"City, Country"} />
                 </div>
                 <div className="relative">
-                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#566C9E]"/>
+                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#e1ebed]"/>
                   <input value={data.website} onChange={e => setData(d=>({...d,website:e.target.value}))}
                     className={`${inp} pl-8`} placeholder="linkedin.com/in/..." />
                 </div>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-4 text-xs text-[#566C9E]">
+              <div className="flex flex-wrap gap-4 text-xs text-[#e1ebed]">
                 {data.location && <span className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5"/>{data.location}</span>}
                 {data.website && (
                   <a href={data.website.startsWith("http")?data.website:`https://${data.website}`}
@@ -617,7 +732,7 @@ export default function Profile() {
                   <Mail className="w-4 h-4 text-[#12B2C1]"/>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[10px] text-[#566C9E] uppercase tracking-wider mb-0.5">{t.emailLabel}</p>
+                  <p className="text-[11px] text-[#e1ebed] uppercase tracking-wider mb-0.5">{t.emailLabel}</p>
                   <p className="text-sm text-[#F5F0E9] truncate">{email}</p>
                 </div>
               </div>
@@ -629,7 +744,7 @@ export default function Profile() {
                 />
               )}
               {!editMode && (
-                <span className="flex items-center gap-1 text-[10px] text-[#566C9E]">
+                <span className="flex items-center gap-1 text-[11px] text-[#e1ebed]">
                   {data.email_public ? <Eye className="w-3.5 h-3.5"/> : <Lock className="w-3.5 h-3.5"/>}
                   {data.email_public ? t.publicLabel : t.privateLabel}
                 </span>
@@ -644,7 +759,7 @@ export default function Profile() {
                   <Phone className="w-4 h-4 text-[#E0C58F]"/>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] text-[#566C9E] uppercase tracking-wider mb-0.5">{t.phoneLabel}</p>
+                  <p className="text-[11px] text-[#e1ebed] uppercase tracking-wider mb-0.5">{t.phoneLabel}</p>
                   {editMode ? (
                     <input value={data.phone} onChange={e=>setData(d=>({...d,phone:e.target.value}))}
                       dir="ltr" className={inp} placeholder="+961 70 000 000"/>
@@ -661,7 +776,7 @@ export default function Profile() {
                 />
               )}
               {!editMode && (
-                <span className="flex items-center gap-1 text-[10px] text-[#566C9E]">
+                <span className="flex items-center gap-1 text-[11px] text-[#e1ebed]">
                   {data.phone_public ? <Eye className="w-3.5 h-3.5"/> : <Lock className="w-3.5 h-3.5"/>}
                   {data.phone_public ? t.publicLabel : t.privateLabel}
                 </span>
@@ -689,11 +804,11 @@ export default function Profile() {
                     ? <><Loader2 className="w-3.5 h-3.5 animate-spin"/>{isRtl?"جاري التوليد...":"Generating..."}</>
                     : <>{data.ai_summary ? <RefreshCw className="w-3.5 h-3.5"/> : <Sparkles className="w-3.5 h-3.5"/>}{data.ai_summary ? t.regenerateBtn : t.generateBtn}</>}
                 </button>
-                <p className="text-[10px] text-[#566C9E]">{t.genSummaryHint}</p>
+                <p className="text-[11px] text-[#e1ebed]">{t.genSummaryHint}</p>
               </>
             ) : (
               <p className="text-sm text-[#A8B4CC] leading-[1.9]">
-                {data.ai_summary || data.about || <span className="italic text-[#566C9E]">{t.noSummary}</span>}
+                {data.ai_summary || data.about || <span className="italic text-[#e1ebed]">{t.noSummary}</span>}
               </p>
             )}
           </div>
@@ -710,7 +825,7 @@ export default function Profile() {
                   {editMode && <button onClick={()=>removeJob(j)}><X className="w-3 h-3 opacity-60 hover:opacity-100"/></button>}
                 </span>
               ))}
-              {!data.target_jobs.length && <p className="text-xs text-[#566C9E] italic">{t.noJobs}</p>}
+              {!data.target_jobs.length && <p className="text-xs text-[#e1ebed] italic">{t.noJobs}</p>}
             </div>
 
             {editMode && (
@@ -736,7 +851,7 @@ export default function Profile() {
 
                 {jobSuggestions.length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-[10px] text-[#566C9E] uppercase tracking-wider">{t.jobSuggestHint}</p>
+                    <p className="text-[11px] text-[#e1ebed] uppercase tracking-wider">{t.jobSuggestHint}</p>
                     <div className="flex flex-wrap gap-2">
                       {jobSuggestions.map(s => (
                         <button key={s} onClick={()=>addJob(s)}
@@ -764,7 +879,7 @@ export default function Profile() {
                   {editMode && <button onClick={()=>removeSkill(s)}><X className="w-3 h-3 opacity-60 hover:opacity-100"/></button>}
                 </span>
               ))}
-              {!data.skills.length && <p className="text-xs text-[#566C9E] italic">{t.noSkills}</p>}
+              {!data.skills.length && <p className="text-xs text-[#e1ebed] italic">{t.noSkills}</p>}
             </div>
             {editMode && (
               <div className="flex gap-2">
@@ -788,22 +903,22 @@ export default function Profile() {
               <div key={i} className="flex gap-4 group pb-5 border-b border-[rgba(60,80,125,0.1)] last:border-0 last:pb-0">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
                   style={{ background:"rgba(60,80,125,0.1)", border:"1px solid rgba(60,80,125,0.2)" }}>
-                  <Briefcase className="w-4 h-4 text-[#566C9E]"/>
+                  <Briefcase className="w-4 h-4 text-[#e1ebed]"/>
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-bold text-[#F5F0E9]">{exp.title}</h3>
                   <p className="text-xs text-[#12B2C1] font-medium mt-0.5">{exp.company}</p>
-                  <p className="text-[11px] text-[#566C9E] mt-0.5 mb-2 font-mono">{exp.duration}</p>
+                  <p className="text-[12px] text-[#e1ebed] mt-0.5 mb-2 font-mono">{exp.duration}</p>
                   {exp.description && <p className="text-xs text-[#A8B4CC] leading-[1.8]">{exp.description}</p>}
                 </div>
                 {editMode && (
-                  <button onClick={()=>removeExp(i)} className="text-[#566C9E] hover:text-red-400 transition-colors flex-shrink-0">
+                  <button onClick={()=>removeExp(i)} className="text-[#e1ebed] hover:text-red-400 transition-colors flex-shrink-0">
                     <X className="w-4 h-4"/>
                   </button>
                 )}
               </div>
             ))}
-            {!data.experience.length && <p className="text-xs text-[#566C9E] italic">{t.noExp}</p>}
+            {!data.experience.length && <p className="text-xs text-[#e1ebed] italic">{t.noExp}</p>}
 
             {editMode && (
               showExpForm ? (
@@ -853,7 +968,7 @@ export default function Profile() {
               <div className="text-2xl font-black font-mono mb-1" style={{ color }}>
                 {value === null ? "—" : value}
               </div>
-              <div className="text-[10px] text-[#A8B4CC]">{label}</div>
+              <div className="text-[11px] text-[#A8B4CC]">{label}</div>
             </div>
           ))}
         </div>
@@ -865,22 +980,22 @@ export default function Profile() {
               <div key={i} className="flex gap-4 group pb-5 border-b border-[rgba(60,80,125,0.1)] last:border-0 last:pb-0">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
                   style={{ background:"rgba(60,80,125,0.1)", border:"1px solid rgba(60,80,125,0.2)" }}>
-                  <GraduationCap className="w-4 h-4 text-[#566C9E]"/>
+                  <GraduationCap className="w-4 h-4 text-[#e1ebed]"/>
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-bold text-[#F5F0E9]">{edu.degree}</h3>
                   {edu.major && <p className="text-xs text-[#E0C58F] font-medium mt-0.5">{edu.major}</p>}
                   <p className="text-xs text-[#12B2C1] font-medium mt-0.5">{edu.institution}</p>
-                  {edu.year && <p className="text-[11px] text-[#566C9E] mt-0.5 font-mono">{edu.year}</p>}
+                  {edu.year && <p className="text-[12px] text-[#e1ebed] mt-0.5 font-mono">{edu.year}</p>}
                 </div>
                 {editMode && (
-                  <button onClick={()=>removeEdu(i)} className="text-[#566C9E] hover:text-red-400 transition-colors flex-shrink-0">
+                  <button onClick={()=>removeEdu(i)} className="text-[#e1ebed] hover:text-red-400 transition-colors flex-shrink-0">
                     <X className="w-4 h-4"/>
                   </button>
                 )}
               </div>
             ))}
-            {!data.education.length && <p className="text-xs text-[#566C9E] italic">{t.noEdu}</p>}
+            {!data.education.length && <p className="text-xs text-[#e1ebed] italic">{t.noEdu}</p>}
 
             {editMode && (
               showEduForm ? (
@@ -927,7 +1042,7 @@ export default function Profile() {
 function Card({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
     <div className="rounded-2xl p-5 sm:p-6" style={{ background:"rgba(13,17,23,0.85)", backdropFilter:"blur(24px)", border:"1px solid rgba(60,80,125,0.15)" }}>
-      {title && <h2 className="text-[11px] font-bold text-[#E0C58F] uppercase tracking-widest mb-5">{title}</h2>}
+      {title && <h2 className="text-[12px] font-bold text-[#E0C58F] uppercase tracking-widest mb-5">{title}</h2>}
       {children}
     </div>
   );
@@ -938,11 +1053,11 @@ function PrivacyToggle({ isPublic, onChange, publicLabel, privateLabel }:
   { isPublic: boolean; onChange: (v:boolean)=>void; publicLabel: string; privateLabel: string }) {
   return (
     <button onClick={() => onChange(!isPublic)}
-      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium flex-shrink-0 transition-all"
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium flex-shrink-0 transition-all"
       style={{
         background: isPublic ? "rgba(18,178,193,0.08)" : "rgba(60,80,125,0.06)",
         border: isPublic ? "1px solid rgba(18,178,193,0.2)" : "1px solid rgba(60,80,125,0.15)",
-        color: isPublic ? "#12B2C1" : "#566C9E",
+        color: isPublic ? "#12B2C1" : "#e1ebed",
       }}>
       {isPublic ? <Eye className="w-3 h-3"/> : <Lock className="w-3 h-3"/>}
       {isPublic ? publicLabel : privateLabel}

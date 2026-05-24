@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ExternalLink, Zap } from "lucide-react";
 import { employersList } from "./data/employersData";
@@ -39,7 +39,7 @@ export default function AnalysisLinks() {
                 </div>
                 <div>
                   <h3 className="font-bold text-white leading-tight">{company.name}</h3>
-                  <p className="text-[10px] text-cyber-dim font-black uppercase tracking-tighter">{company.industry}</p>
+                  <p className="text-[11px] text-cyber-dim font-black uppercase tracking-tighter">{company.industry}</p>
                 </div>
               </div>
               <a href={company.careerPageUrl} target="_blank" rel="noreferrer" className="w-full py-2.5 bg-white/5 border border-white/10 text-cyber-muted rounded-xl text-xs font-bold flex items-center justify-center gap-2 group-hover:bg-cyber-teal group-hover:border-cyber-teal group-hover:text-white transition-all">

@@ -16,33 +16,28 @@ export default function NotificationListener() {
         supabase.removeChannel(channel);
       }
 
-      console.log("🔌 [SYSTEM] Initializing Realtime Link for Node:", userId);
-
       channel = supabase
         .channel(`user-notifications-${userId}`)
         .on(
           'postgres_changes',
           {
-            event: '*', 
+            event: '*',
             schema: 'public',
             table: 'cv_archive',
             filter: `user_id=eq.${userId}`
           },
           (payload) => {
-            console.log("🔥 [EVENT] Data Stream Injected:", payload);
-            
             const newDoc = payload.new as any;
-            
-            // التحقق من جهوزية الملف
-            if (newDoc && newDoc.cv_pdf_url) {
-               console.log("✅ [SUCCESS] Neural Construction Complete!");
-               
-               // 1. إرسال الإشارة لصفحة التحميل (Custom Event)
-               window.dispatchEvent(new CustomEvent('cv_ready_signal', { 
-                 detail: { url: newDoc.cv_pdf_url } 
+
+            // Defense-in-depth: verify row belongs to current user
+            if (!newDoc || newDoc.user_id !== userId) return;
+
+            if (newDoc.cv_pdf_url) {
+               // Notify download page
+               window.dispatchEvent(new CustomEvent('cv_ready_signal', {
+                 detail: { url: newDoc.cv_pdf_url }
                }));
 
-               // 2. إظهار الإشعار بستايل Cyber
                toast.success("Construction Complete 🚀", {
                  id: `cv-ready-${newDoc.id || 'unique'}`,
                  description: "Your professional document has been generated and is ready for deployment.",
@@ -61,11 +56,7 @@ export default function NotificationListener() {
             }
           }
         )
-        .subscribe((status) => {
-           if (status === 'SUBSCRIBED') {
-             console.log("📡 [STATUS] Link Established: Secure Node", userId);
-           }
-        });
+        .subscribe();
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {

@@ -1,174 +1,255 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  FileText, Settings2, LogOut, Loader2,
-  BrainCircuit, Shield, Zap, Activity, Database, UserCircle2,
+  Loader2, BrainCircuit, ChevronRight,
+  LayoutDashboard, Zap, UserCircle2,
 } from "lucide-react";
 import { supabase } from "../supabase";
+import { useLang } from "../context/LanguageContext";
+
+interface UserData {
+  first_name: string | null;
+  last_name:  string | null;
+  username:   string | null;
+}
 
 export default function Dashboard() {
-  const navigate  = useNavigate();
-  const [userName, setUserName] = useState("");
-  const [loading,  setLoading]  = useState(true);
+  const navigate = useNavigate();
+  const { lang, isRtl } = useLang();
+
+  const [user, setUser]       = useState<UserData | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const checkUser = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) { navigate("/login"); return; }
+    const lsKey = Object.keys(localStorage).find(
+      k => k.startsWith("sb-") && k.endsWith("-auth-token")
+    );
+    let cachedSession: any = null;
+    if (lsKey) {
+      try { cachedSession = JSON.parse(localStorage.getItem(lsKey) || "null"); } catch {}
+    }
 
-        const fullName = session.user.user_metadata?.full_name;
-        if (fullName) {
-          setUserName(fullName.split(" ")[0]);
-        } else {
-          const name = (session.user.email || "").split("@")[0];
-          setUserName(name.charAt(0).toUpperCase() + name.slice(1));
-        }
-        setLoading(false);
-      } catch (error) {
-        console.error("Dashboard Auth Error:", error);
-        setLoading(false);
+    if (!cachedSession?.user) {
+      navigate("/login");
+      setLoading(false);
+      return;
+    }
+
+    const meta      = cachedSession.user.user_metadata ?? {};
+    const nameParts = (meta.full_name || "").trim().split(" ");
+    setUser({ first_name: nameParts[0] || null, last_name: nameParts.slice(1).join(" ") || null, username: null });
+    setLoading(false);
+
+    const uid = cachedSession.user.id;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { navigate("/login"); return; }
+      if (uid) {
+        supabase
+          .from("users")
+          .select("first_name, last_name, username")
+          .eq("id", uid)
+          .maybeSingle()
+          .then(({ data }) => { if (data) setUser(data); })
+          .catch(() => {});
       }
-    };
-    checkUser();
+    }).catch(() => {});
   }, [navigate]);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate("/");
-  };
+  const t = {
+    en: {
+      welcome:    "Welcome back,",
+      sub:        "What would you like to do today?",
+
+      // Card 1 — Analyze
+      c1Title:    "Analyze My CV",
+      c1Desc:     "Upload your CV and get an instant ATS score, keyword gap report, and recruiter-ready suggestions.",
+      c1Btn:      "Start Analysis",
+
+      // Card 2 — My Account
+      c2Title:    "My Account",
+      c2Desc:     "View your saved forms, download completed CVs, manage your plan, and update your information.",
+      c2Btn:      "Go to Account",
+
+      // Card 3 — Plans & Pricing
+      c3Title:    "Plans & Pricing",
+      c3Desc:     "Free, Premium, or Gold — pick the plan that fits your career ambitions and get your CV built fast.",
+      c3Btn:      "View Plans",
+    },
+    ar: {
+      welcome:    "أهلاً بك،",
+      sub:        "ماذا تريد أن تفعل اليوم؟",
+
+      // Card 1 — Analyze
+      c1Title:    "حلّل سيرتي الذاتية",
+      c1Desc:     "ارفع سيرتك واحصل على تقييم ATS فوري، تقرير الكلمات المفتاحية، واقتراحات جاهزة للمحركين.",
+      c1Btn:      "ابدأ التحليل",
+
+      // Card 2 — My Account
+      c2Title:    "حسابي",
+      c2Desc:     "اعرض نماذجك المحفوظة، حمّل السير الذاتية المكتملة، أدر باقتك، وحدّث معلوماتك.",
+      c2Btn:      "فتح الحساب",
+
+      // Card 3 — Plans & Pricing
+      c3Title:    "الباقات والأسعار",
+      c3Desc:     "مجاني، بريميوم، أو ذهبي — اختر الباقة المناسبة لطموحاتك واحصل على سيرتك بسرعة.",
+      c3Btn:      "عرض الباقات",
+    },
+  }[lang];
+
+  const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || "—";
+  const initials = [user?.first_name?.[0], user?.last_name?.[0]].filter(Boolean).join("").toUpperCase() || "?";
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-cyber-bg">
-        <Loader2 className="animate-spin text-cyber-cyan w-10 h-10" />
+      <div className="min-h-screen flex items-center justify-center bg-[#0D1117]">
+        <Loader2 className="animate-spin text-[#12B2C1] w-8 h-8" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-cyber-bg text-cyber-text/90 font-sans relative overflow-x-hidden flex flex-col">
+    <div
+      className="min-h-screen bg-[#0D1117] text-[#D9CBC2]"
+      dir={isRtl ? "rtl" : "ltr"}
+      style={{ fontFamily: isRtl ? "'Tajawal', sans-serif" : "'Plus Jakarta Sans', sans-serif" }}
+    >
+      {/* ── Ambient glows ── */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute top-0 right-0 w-[55vw] h-[55vw] bg-[rgba(60,80,125,0.07)] rounded-full blur-[150px]" />
+        <div className="absolute bottom-0 left-0  w-[40vw] h-[40vw] bg-[rgba(18,178,193,0.03)] rounded-full blur-[120px]" />
+      </div>
 
-      {/* Ambient glows */}
-      <div className="absolute top-0 right-0 w-[65vw] h-[65vw] bg-cyber-teal/8 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-[55vw] h-[55vw] bg-cyber-teal/5 rounded-full blur-[130px] pointer-events-none" />
+      <div className="relative z-10 max-w-4xl mx-auto px-6 py-14">
 
-      <div className="relative z-10 max-w-7xl w-full mx-auto px-6 py-12 flex-1">
+        {/* ── Welcome header ── */}
+        <div className="flex items-center gap-4 mb-12">
 
-        {/* ── Header bar ── */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-14 gap-6 border-b border-white/5 pb-10">
+          {/* Avatar */}
+          <div
+            className="w-12 h-12 rounded-2xl flex items-center justify-center text-sm font-black text-[#F5F0E9] flex-shrink-0"
+            style={{
+              background: "linear-gradient(135deg, #112250, #162A60)",
+              border: "1.5px solid rgba(18,178,193,0.25)",
+            }}
+          >
+            {initials}
+          </div>
+
+          {/* Text */}
           <div>
-            <div className="flex items-center gap-2 text-cyber-cyan mb-3">
-              <Activity className="w-4 h-4" />
-              <span className="text-[10px] font-black uppercase tracking-[0.4em]">System Online</span>
-            </div>
-            <h1 className="text-4xl lg:text-6xl font-black text-white tracking-tight mb-1">
-              Welcome,{" "}
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyber-cyan to-cyber-teal">
-                {userName}
-              </span>
-            </h1>
-            <p className="text-cyber-muted text-sm font-medium tracking-wide">
-              Select a tool to accelerate your career.
+            <p className="text-[12px] text-[#e1ebed] font-semibold uppercase tracking-widest mb-0.5">
+              {t.welcome}
             </p>
+            <h1 className="text-2xl font-bold text-[#F5F0E9] leading-tight">{fullName}</h1>
+            <p className="text-xs text-[#7A8FAA] mt-1">{t.sub}</p>
           </div>
-
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-5 py-3 bg-red-500/5 border border-red-500/20 rounded-2xl text-red-400 hover:bg-red-500/10 hover:border-red-500/35 transition-all duration-300 text-[10px] font-black uppercase tracking-widest"
-          >
-            <LogOut className="w-4 h-4" /> Sign Out
-          </button>
         </div>
 
-        {/* ── Main grid ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* ── 3-Card grid ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
 
-          {/* Build */}
-          <div
-            onClick={() => navigate("/builder")}
-            className="group relative bg-white/5 backdrop-blur-xl border border-white/10 hover:border-cyber-teal/40 rounded-[2rem] p-10 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center text-center min-h-[380px] hover:bg-cyber-teal/5 hover:shadow-[0_0_40px_rgba(13,138,158,0.15)]"
-          >
-            <div className="w-20 h-20 bg-cyber-teal/10 border border-cyber-teal/20 rounded-3xl flex items-center justify-center mb-7 group-hover:scale-110 group-hover:shadow-[0_0_24px_rgba(13,138,158,0.35)] transition-all duration-300">
-              <FileText className="w-9 h-9 text-cyber-cyan" strokeWidth={1.5} />
-            </div>
-            <h2 className="text-xl font-black text-white mb-2 tracking-tight">Resume Builder</h2>
-            <p className="text-cyber-muted mb-8 text-sm leading-relaxed max-w-[200px]">
-              Build an ATS-optimized resume powered by AI.
-            </p>
-            <div className="w-full bg-gradient-to-r from-cyber-teal to-cyber-cyan text-white py-3.5 rounded-2xl font-black text-[11px] uppercase tracking-widest group-hover:from-cyber-teal/80 group-hover:to-cyber-cyan/80 transition-all shadow-[0_0_20px_rgba(13,138,158,0.3)]">
-              Open Builder →
-            </div>
-          </div>
+          {/* Card 1 — Analyze My CV */}
+          <ActionCard
+            icon={<BrainCircuit className="w-5 h-5" strokeWidth={1.75} />}
+            iconColor="#E0C58F"
+            iconBg="rgba(224,197,143,0.09)"
+            iconBorder="rgba(224,197,143,0.22)"
+            accentColor="#E0C58F"
+            title={t.c1Title}
+            desc={t.c1Desc}
+            btnLabel={t.c1Btn}
+            isRtl={isRtl}
+            onClick={() => navigate("/analyse")}
+          />
 
-          {/* Analyze */}
-          <div
-            onClick={() => navigate("/career-analysis")}
-            className="group relative bg-white/5 backdrop-blur-xl border border-white/10 hover:border-cyber-teal/40 rounded-[2rem] p-10 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center text-center min-h-[380px] hover:bg-cyber-teal/5 hover:shadow-[0_0_40px_rgba(13,138,158,0.15)]"
-          >
-            <div className="w-20 h-20 bg-cyber-teal/10 border border-cyber-teal/20 rounded-3xl flex items-center justify-center mb-7 group-hover:scale-110 group-hover:shadow-[0_0_24px_rgba(13,138,158,0.35)] transition-all duration-300">
-              <BrainCircuit className="w-9 h-9 text-cyber-teal" strokeWidth={1.5} />
-            </div>
-            <h2 className="text-xl font-black text-white mb-2 tracking-tight">AI Analyzer</h2>
-            <p className="text-cyber-muted mb-8 text-sm leading-relaxed max-w-[200px]">
-              Deep-scan your career and extract top keywords.
-            </p>
-            <div className="w-full bg-gradient-to-r from-cyber-teal to-cyber-cyan text-white py-3.5 rounded-2xl font-black text-[11px] uppercase tracking-widest group-hover:from-cyber-teal/80 group-hover:to-cyber-cyan/80 transition-all shadow-[0_0_20px_rgba(13,138,158,0.3)]">
-              Start Scan →
-            </div>
-          </div>
-
-          {/* Account */}
-          <div
+          {/* Card 2 — My Account */}
+          <ActionCard
+            icon={<UserCircle2 className="w-5 h-5" strokeWidth={1.75} />}
+            iconColor="#12B2C1"
+            iconBg="rgba(18,178,193,0.09)"
+            iconBorder="rgba(18,178,193,0.22)"
+            accentColor="#12B2C1"
+            title={t.c2Title}
+            desc={t.c2Desc}
+            btnLabel={t.c2Btn}
+            isRtl={isRtl}
             onClick={() => navigate("/my-account")}
-            className="group relative bg-white/5 backdrop-blur-xl border border-white/10 hover:border-white/20 rounded-[2rem] p-10 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center text-center min-h-[380px] hover:bg-white/5"
-          >
-            <div className="w-20 h-20 bg-white/5 border border-white/10 rounded-3xl flex items-center justify-center mb-7 group-hover:bg-white/10 transition-all duration-300">
-              <Settings2 className="w-9 h-9 text-cyber-dim group-hover:text-white transition-colors" strokeWidth={1.5} />
-            </div>
-            <h2 className="text-xl font-black text-white mb-2 tracking-tight">My Account</h2>
-            <p className="text-cyber-muted mb-8 text-sm leading-relaxed max-w-[200px]">
-              Manage your subscription, history, and settings.
-            </p>
-            <div className="w-full bg-white/5 border border-white/10 text-cyber-muted py-3.5 rounded-2xl font-black text-[11px] uppercase tracking-widest group-hover:bg-white group-hover:text-black transition-all">
-              Open Account →
-            </div>
-          </div>
+          />
 
-          {/* Profile — full-width */}
-          <div
-            onClick={() => navigate("/profile")}
-            className="group relative bg-white/5 backdrop-blur-xl border border-white/10 hover:border-cyber-cyan/40 rounded-[2rem] p-10 transition-all duration-300 cursor-pointer flex flex-col items-center justify-center text-center min-h-[280px] hover:bg-cyber-cyan/5 hover:shadow-[0_0_40px_rgba(18,178,193,0.12)] md:col-span-2 lg:col-span-3"
-          >
-            <div className="w-20 h-20 bg-cyber-cyan/10 border border-cyber-cyan/20 rounded-3xl flex items-center justify-center mb-7 group-hover:scale-110 group-hover:shadow-[0_0_24px_rgba(18,178,193,0.3)] transition-all duration-300">
-              <UserCircle2 className="w-9 h-9 text-cyber-cyan" strokeWidth={1.5} />
-            </div>
-            <h2 className="text-xl font-black text-white mb-2 tracking-tight">Professional Profile</h2>
-            <p className="text-cyber-muted mb-8 text-sm leading-relaxed max-w-[320px]">
-              Your public career profile — headline, experience, skills, and links.
-            </p>
-            <div className="bg-gradient-to-r from-cyber-cyan to-cyber-teal text-white px-10 py-3.5 rounded-2xl font-black text-[11px] uppercase tracking-widest group-hover:from-cyber-cyan/80 group-hover:to-cyber-teal/80 transition-all shadow-[0_0_20px_rgba(18,178,193,0.25)]">
-              View Profile →
-            </div>
-          </div>
-        </div>
+          {/* Card 3 — Plans & Pricing  (sapphire.light — system token, avoids off-palette purple) */}
+          <ActionCard
+            icon={<Zap className="w-5 h-5" strokeWidth={1.75} />}
+            iconColor="#566C9E"
+            iconBg="rgba(86,108,158,0.09)"
+            iconBorder="rgba(86,108,158,0.22)"
+            accentColor="#566C9E"
+            title={t.c3Title}
+            desc={t.c3Desc}
+            btnLabel={t.c3Btn}
+            isRtl={isRtl}
+            onClick={() => navigate("/my-account")}
+          />
 
-        {/* ── System status bar ── */}
-        <div className="mt-16 flex flex-wrap justify-center gap-10 opacity-25 pointer-events-none select-none">
-          <div className="flex items-center gap-2">
-            <Shield className="w-3.5 h-3.5" />
-            <span className="text-[9px] font-black uppercase tracking-widest">End-to-End Encrypted</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Zap className="w-3.5 h-3.5" />
-            <span className="text-[9px] font-black uppercase tracking-widest">Real-time Processing</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Database className="w-3.5 h-3.5" />
-            <span className="text-[9px] font-black uppercase tracking-widest">Cloud Infrastructure</span>
-          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Reusable card ──
+interface ActionCardProps {
+  icon:        React.ReactNode;
+  iconColor:   string;
+  iconBg:      string;
+  iconBorder:  string;
+  accentColor: string;
+  title:       string;
+  desc:        string;
+  btnLabel:    string;
+  isRtl:       boolean;
+  onClick:     () => void;
+}
+
+function ActionCard({
+  icon, iconColor, iconBg, iconBorder,
+  accentColor, title, desc, btnLabel, isRtl, onClick,
+}: ActionCardProps) {
+  return (
+    <button
+      onClick={onClick}
+      className="group text-start w-full rounded-2xl p-6 flex flex-col gap-5 transition-all duration-300 hover:-translate-y-0.5 active:scale-[0.99]"
+      style={{
+        background:    "rgba(13,17,23,0.85)",
+        backdropFilter: "blur(24px)",
+        border:         "1px solid rgba(60,80,125,0.14)",
+      }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = `${accentColor}38`)}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = "rgba(60,80,125,0.14)")}
+    >
+      {/* Icon badge */}
+      <div
+        className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+        style={{ background: iconBg, border: `1px solid ${iconBorder}`, color: iconColor }}
+      >
+        {icon}
+      </div>
+
+      {/* Title + desc */}
+      <div className="flex-1">
+        <h3 className="text-[15px] font-bold text-[#F5F0E9] mb-2 leading-snug">{title}</h3>
+        <p className="text-[12px] text-[#e1ebed] leading-[1.85] font-light">{desc}</p>
+      </div>
+
+      {/* CTA row */}
+      <div
+        className={`flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wider transition-all duration-200 group-hover:gap-2.5 w-fit ${isRtl ? "flex-row-reverse" : ""}`}
+        style={{ color: accentColor }}
+      >
+        {btnLabel}
+        <ChevronRight
+          className={`w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5 ${isRtl ? "rotate-180 group-hover:-translate-x-0.5 group-hover:translate-x-0" : ""}`}
+        />
+      </div>
+    </button>
   );
 }

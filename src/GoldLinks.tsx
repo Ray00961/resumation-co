@@ -1,8 +1,18 @@
+﻿import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { ExternalLink, MapPin, Star, Sparkles } from "lucide-react";
 import { employersList, type Employer } from "./data/employersData";
+import { supabase } from "./supabase";
 
 export default function GoldLinks() {
+  const navigate = useNavigate();
   const goldCompanies = employersList.slice(0, 50);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) navigate("/login");
+    });
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-cyber-bg py-20 px-4 font-sans relative overflow-hidden">
@@ -29,7 +39,7 @@ export default function GoldLinks() {
               </div>
               <div className="p-6">
                 <div className="flex justify-between items-start mb-4">
-                  <span className="bg-white/5 text-cyber-dim px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10">{company.industry}</span>
+                  <span className="bg-white/5 text-cyber-dim px-3 py-1 rounded-lg text-[11px] font-black uppercase tracking-widest border border-white/10">{company.industry}</span>
                 </div>
                 <div className="flex items-center gap-2 text-cyber-muted text-sm mb-6 font-medium">
                   <MapPin className="w-4 h-4 text-cyber-cyan" />

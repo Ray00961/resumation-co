@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ExternalLink, ShieldCheck } from "lucide-react";
 import { employersList } from "./data/employersData";
@@ -38,7 +38,7 @@ export default function PremiumLinks() {
                 <h3 className="text-white font-bold text-xl relative z-10 tracking-tight">{company.name}</h3>
               </div>
               <div className="p-6">
-                <div className="text-[10px] font-black text-cyber-dim uppercase mb-4 tracking-widest">{company.industry}</div>
+                <div className="text-[11px] font-black text-cyber-dim uppercase mb-4 tracking-widest">{company.industry}</div>
                 <a href={company.careerPageUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center w-full bg-cyber-teal text-white py-3.5 rounded-2xl font-bold hover:bg-cyber-cyan transition-all gap-2 shadow-lg">
                   Apply via Career Page <ExternalLink className="w-4 h-4" />
                 </a>

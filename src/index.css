@@ -2,65 +2,134 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ══════════════════════════════════════════════════════════════════════════
+   RESUMATION DESIGN TOKEN SYSTEM — CSS custom properties
+   Single source of truth. Tailwind config mirrors these values.
+   Use in vanilla CSS with: var(--clr-bg), var(--clr-cyan), etc.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Core backgrounds ── */
+  --clr-bg:          #0D1117;   /* page background                         */
+  --clr-royal:       #112250;   /* icon wells, deep card surfaces          */
+  --clr-royal-deep:  #081026;   /* darkest surface / button base           */
+  --clr-royal-surf:  #162A60;   /* elevated royal surface                  */
+
+  /* ── Sapphire — primary blue tint ── */
+  --clr-sapphire:    #3C507D;
+  --clr-sapphire-dk: #1A2644;
+  --clr-sapphire-lt: #566C9E;
+
+  /* ── Glass surfaces (rgba strings — use with CSS) ── */
+  --glass-bg:        rgba(60, 80, 125, 0.07);
+  --glass-border:    rgba(60, 80, 125, 0.20);
+  --glass-hover:     rgba(60, 80, 125, 0.13);
+
+  /* ── Accent colours ── */
+  --clr-cyan:        #12B2C1;   /* interactive CTA / active states         */
+  --clr-cyan-dim:    #0E8F9C;   /* cyan darker variant (button gradient)   */
+  --clr-gold:        #E0C58F;   /* premium / logo / badge gold             */
+  --clr-gold-dk:     #C6AA73;   /* supporting gold                         */
+  --clr-gold-lt:     #F0DFBF;   /* hover highlight gold                    */
+
+  /* ── Text ── */
+  --clr-text-primary: #F5F0E9;  /* canvas.white — headings, labels         */
+  --clr-text-body:    #D9CBC2;  /* canvas.neutral — body copy              */
+  --clr-text-muted:   #A8B4CC;  /* muted labels, placeholders              */
+  --clr-text-dim:     #e1ebed;  /* mono tags, secondary muted              */
+  --clr-text-faint:   #7A8FAA;  /* footer, placeholders, disabled          */
+}
+
 @layer base {
-  html {
-    background-color: #1F2B2D;
-    color: #E5F9F8;
+  html, body {
+    background-color: #0D1117 !important;
+    color: #F5F0E9 !important;
+    font-family: "Plus Jakarta Sans", Inter, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
   }
 
-  body {
-    font-family: "Plus Jakarta Sans", Inter, system-ui, sans-serif;
-    background-color: #1F2B2D;
-    color: #E5F9F8;
+  /* فرض خط تجول العصري والانسيابي هندسياً مع موازنة مثالية للمساحات */
+  :lang(ar), [dir="rtl"], .font-arabic {
+    font-family: 'Tajawal', "IBM Plex Sans Arabic", system-ui, sans-serif !important;
+    line-height: 1.65 !important;
+    letter-spacing: 0 !important;
+  }
+
+  /* تحسينات العناوين لتتنفس بفخامة ساس النخبة */
+  h1, h2, h3, h4, h5, h6 {
+    text-rendering: optimizeLegibility;
+    color: #F5F0E9;
+  }
+}
+
+@layer components {
+  /* الخلفية السيبرانية الأساسية للمنصة - شبكة دقيقة جداً وخافتة */
+  .cyber-grid {
+    background-image: 
+      linear-gradient(to right, rgba(60, 80, 125, 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(60, 80, 125, 0.04) 1px, transparent 1px) !important;
+    background-size: 50px 50px !important;
   }
 }
 
 @layer utilities {
-  /* ── Glassmorphism surfaces ── */
-  .cyber-glass {
-    background: rgba(35, 113, 123, 0.12);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(18, 178, 193, 0.14);
+  /* ── LUXURY GLASSMORPHISM SYSTEM (Sapphire Core) ── */
+  /* تحويل الأسطح المعتمة والمخضرة إلى أسطح زجاجية سينمائية فخمة جداً ومريحة للعين */
+  .cyber-glass, .glass-card {
+    background: rgba(60, 80, 125, 0.15) !important;
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+    border: 1px solid rgba(60, 80, 125, 0.3) !important;
+    box-shadow: 
+      0 4px 30px rgba(0, 0, 0, 0.4),
+      inset 0 1px 1px 0 rgba(245, 240, 233, 0.05) !important;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .cyber-glass-md {
-    background: rgba(35, 113, 123, 0.18);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(18, 178, 193, 0.2);
+    background: rgba(60, 80, 125, 0.22) !important;
+    backdrop-filter: blur(28px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
+    border: 1px solid rgba(60, 80, 125, 0.35) !important;
+    box-shadow: 
+      0 8px 32px rgba(0, 0, 0, 0.5),
+      inset 0 1px 1px 0 rgba(245, 240, 233, 0.06) !important;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .cyber-glass-strong {
-    background: rgba(35, 113, 123, 0.28);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(18, 178, 193, 0.25);
+    background: rgba(17, 34, 80, 0.45) !important;
+    backdrop-filter: blur(32px) saturate(200%) !important;
+    -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
+    border: 1px solid rgba(60, 80, 125, 0.45) !important;
+    box-shadow: 
+      0 12px 40px rgba(0, 0, 0, 0.6),
+      inset 0 1px 2px 0 rgba(245, 240, 233, 0.08) !important;
   }
 
-  /* ── Glow shadows ── */
+  /* ── REFINED CINEMATIC NEON GLOWS (No Gaming Excess) ── */
   .cyber-glow {
-    box-shadow: 0 0 20px rgba(13, 138, 158, 0.2);
+    box-shadow: 0 0 25px -5px rgba(60, 80, 125, 0.3) !important;
   }
 
   .cyber-glow-lg {
-    box-shadow: 0 0 40px rgba(13, 138, 158, 0.3);
+    box-shadow: 0 0 45px -8px rgba(60, 80, 125, 0.45) !important;
   }
 
+  /* نيون السيان للأشياء التفاعلية والـ Active States فقط وبنعومة فائقة */
   .cyber-glow-cyan {
-    box-shadow: 0 0 20px rgba(18, 178, 193, 0.25);
+    box-shadow: 0 0 20px -4px rgba(18, 178, 193, 0.25), inset 0 0 12px -2px rgba(18, 178, 193, 0.05) !important;
   }
 
-  /* ── Arabic text optimization ── */
-  .font-arabic {
-    font-family: "IBM Plex Sans Arabic", Cairo, system-ui, sans-serif;
-    line-height: 1.85;
-    letter-spacing: 0;
+  /* ── ADVANCED SCANNING EFFECT (Premium Laser Line) ── */
+  /* خط مسح ذكي، انسيابي ومموه الأطراف مخصص لفحص الـ CV وذكاء النظام */
+  .laser-scan-line {
+    background: linear-gradient(to right, transparent, rgba(18, 178, 193, 0.5), transparent) !important;
+    box-shadow: 0 0 15px rgba(18, 178, 193, 0.6) !important;
   }
 
-  /* ── Scrollbar ── */
+  /* ── SCROLLBAR MINIMALISM ── */
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -68,4 +137,27 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+  
+  /* ستايل مخصص ومخفي للـ Scrollbar الفخم وقت الحاجة للظهور */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(60, 80, 125, 0.3);
+    border-radius: 99px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(18, 178, 193, 0.4);
+  }
+}
+
+/* إلغاء تمدد النصوص اللاتينية عند تفعيل القراءة من اليمين لليسار */
+[dir="rtl"] .tracking-lux,
+[dir="rtl"] .tracking-sublux,
+[dir="rtl"] .tracking-bodylux {
+  letter-spacing: 0 !important;
 }

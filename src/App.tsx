@@ -1,120 +1,137 @@
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { useEffect } from "react";
+import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
+import { LanguageProvider } from "./context/LanguageContext";
+import { SidebarProvider } from "./context/SidebarContext";
 
-// استيراد المكونات الأساسية (Layout)
 import Header from "./components/Header";
 import Footer from "./components/Footer";
+import SidebarLayout from "./components/SidebarLayout";
+import NotificationListener from "./components/NotificationListener";
+import ScrollToTop from "./components/ScrollToTop";
 
-// استيراد مكونات الصفحة الرئيسية
 import Hero from "./components/Hero";
-
-// استيراد الصفحات الأساسية
-import PricingDescription from "./components/PricingDescription"; 
-import PlansPage from "./components/PlansPage";
-import SuccessPage from "./components/SuccessPage";
 import LoginPage from "./components/LoginPage";
 import Dashboard from "./components/Dashboard";
-import BuilderPage from "./components/BuilderPage";
-import CareerAnalysis from "./components/CareerAnalysis"; 
 import MyAccount from "./components/MyAccount";
+import ResumeForm from "./components/ResumeForm";
+import PlansPage from "./components/PlansPage";
 import PackageAccess from "./components/PackageAccess";
+import PricingDescription from "./components/PricingDescription";
+import CareerAnalysis from "./components/CareerAnalysis";
+import SuccessPage from "./components/SuccessPage";
 import ContactPage from "./components/ContactPage";
-import Profile from "./pages/Profile";
-
-// استيراد الصفحات القانونية
+import PrivateProfile from "./pages/PrivateProfile";
+import PublicProfile from "./pages/PublicProfile";
 import Terms from "./components/Terms";
 import Privacy from "./components/Privacy";
+import AboutPage from "./components/AboutPage";
+import ProtectedRoute from "./components/ProtectedRoute";
 
-// استيراد مراقب الإشعارات
-import NotificationListener from "./components/NotificationListener";
+import FreeLinks from "./FreeLinks";
+import PremiumLinks from "./PremiumLinks";
+import GoldLinks from "./GoldLinks";
+import AnalysisLinks from "./AnalysisLinks";
 
-// استيراد صفحات الروابط المصنفة حسب الباقة ✅
-import FreeLinks from "./FreeLinks"; 
-import PremiumLinks from "./PremiumLinks"; 
-import GoldLinks from "./GoldLinks"; 
-import AnalysisLinks from "./AnalysisLinks"; 
+// Pages that use the Sidebar — Footer hidden on these
+const SIDEBAR_PATHS = ["/dashboard", "/my-account", "/account", "/analyse", "/career-analysis", "/profile"];
 
-// FIXED: إضافة مكون بسيط لصفحة 404 (فيك تغير تصميمه لاحقاً)
-const NotFound = () => (
-  <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
-    <h1 className="text-6xl font-black text-cyber-cyan mb-4">404</h1>
-    <p className="text-xl text-cyber-dim mb-8">عذراً، هذه الصفحة غير موجودة.</p>
-    <a href="/" className="bg-cyber-teal text-white px-6 py-2 rounded-lg font-bold hover:bg-cyber-cyan transition-colors">العودة للرئيسية</a>
-  </div>
-);
+function ConditionalFooter() {
+  const { pathname } = useLocation();
+  if (SIDEBAR_PATHS.includes(pathname)) return null;
+  return <Footer />;
+}
+
+const NotFound = () => {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("error") || params.get("error_code")) {
+      window.location.replace("/login" + window.location.search);
+    }
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+      <h1 className="text-6xl font-black text-cyber-cyan mb-4">404</h1>
+      <p className="text-xl text-cyber-dim mb-8">عذراً، هذه الصفحة غير موجودة.</p>
+      <a href="/" className="bg-cyber-teal text-white px-6 py-2 rounded-lg font-bold hover:bg-cyber-cyan transition-colors">
+        العودة للرئيسية
+      </a>
+    </div>
+  );
+};
 
 export default function App() {
   return (
     <Router>
-      <div className="flex flex-col min-h-screen bg-cyber-bg">
-        
-        {/* تشغيل المراقب في الخلفية */}
-        <NotificationListener />
+      <LanguageProvider>
+        <SidebarProvider>
+        <div className="flex flex-col min-h-screen bg-cyber-bg">
 
-        {/* الـ Header سيظهر في كل الصفحات */}
-        <Header />
+          <ScrollToTop />
+          <NotificationListener />
+          <Header />
 
-        {/* محتوى الصفحات المتغير */}
-        <main className="flex-grow">
-          <Routes>
-            
-            {/* الصفحة الرئيسية */}
-            <Route path="/" element={<Hero />} />
+          {/* pt-20 = 80px — clears the floating header (fixed top-4 + h-16) for all pages.
+              Hero.tsx compensates with -mt-20 so its full-bleed image still covers y=0. */}
+          <main className="flex-grow pt-20">
+            <Routes>
 
-            {/* صفحة وصف الباقات (Pricing) */}
-            <Route path="/pricing" element={<PricingDescription />} />
+              {/* ══ PUBLIC ══ */}
+              <Route path="/"          element={<Hero />} />
+              <Route path="/pricing"   element={<PricingDescription />} />
+              <Route path="/login"     element={<LoginPage />} />
+              <Route path="/terms"     element={<Terms />} />
+              <Route path="/privacy"   element={<Privacy />} />
+              <Route path="/about"     element={<AboutPage />} />
+              <Route path="/contact"   element={<ContactPage />} />
+              <Route path="/u/:username" element={<PublicProfile />} />
 
-            {/* صفحة تسجيل الدخول */}
-            <Route path="/login" element={<LoginPage />} />
+              {/* ══ PROTECTED — Sidebar ══ */}
+              <Route path="/dashboard" element={
+                <ProtectedRoute><SidebarLayout><Dashboard /></SidebarLayout></ProtectedRoute>
+              }/>
+              <Route path="/account" element={
+                <ProtectedRoute><SidebarLayout><MyAccount /></SidebarLayout></ProtectedRoute>
+              }/>
+              <Route path="/my-account" element={
+                <ProtectedRoute><SidebarLayout><MyAccount /></SidebarLayout></ProtectedRoute>
+              }/>
+              <Route path="/analyse" element={
+                <ProtectedRoute><SidebarLayout><CareerAnalysis /></SidebarLayout></ProtectedRoute>
+              }/>
+              <Route path="/career-analysis" element={
+                <ProtectedRoute><SidebarLayout><CareerAnalysis /></SidebarLayout></ProtectedRoute>
+              }/>
+              <Route path="/profile" element={
+                <ProtectedRoute><SidebarLayout><PrivateProfile /></SidebarLayout></ProtectedRoute>
+              }/>
 
-            {/* صفحة الداشبورد وحسابي */}
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/account" element={<MyAccount />} />
-            <Route path="/my-account" element={<MyAccount />} />
+              {/* ══ PROTECTED — Full screen ══ */}
+              <Route path="/build"          element={<ProtectedRoute><ResumeForm /></ProtectedRoute>} />
+              <Route path="/build/:id"      element={<ProtectedRoute><ResumeForm /></ProtectedRoute>} />
+              <Route path="/builder"        element={<ProtectedRoute><ResumeForm /></ProtectedRoute>} />
+              <Route path="/resume-builder" element={<ProtectedRoute><ResumeForm /></ProtectedRoute>} />
+              <Route path="/plans"          element={<ProtectedRoute><PlansPage /></ProtectedRoute>} />
+              <Route path="/package-access" element={<ProtectedRoute><PackageAccess /></ProtectedRoute>} />
+              <Route path="/success"        element={<ProtectedRoute><SuccessPage /></ProtectedRoute>} />
+              <Route path="/free-links"     element={<ProtectedRoute><FreeLinks /></ProtectedRoute>} />
+              <Route path="/premium-links"  element={<ProtectedRoute><PremiumLinks /></ProtectedRoute>} />
+              <Route path="/gold-links"     element={<ProtectedRoute><GoldLinks /></ProtectedRoute>} />
+              <Route path="/analysis-links" element={<ProtectedRoute><AnalysisLinks /></ProtectedRoute>} />
+              <Route path="/employer-links" element={<ProtectedRoute><AnalysisLinks /></ProtectedRoute>} />
 
-            {/* بناء السيرة الذاتية وتحليل المسار */}
-            <Route path="/build" element={<BuilderPage />} />
-            <Route path="/builder" element={<BuilderPage />} />
-            <Route path="/analyse" element={<CareerAnalysis />} />
-            <Route path="/career-analysis" element={<CareerAnalysis />} />
+              <Route path="*" element={<NotFound />} />
 
-            {/* صفحة الخطط والوصول للباقة */}
-            <Route path="/plans" element={<PlansPage />} />
-            <Route path="/package-access" element={<PackageAccess />} />
+            </Routes>
+          </main>
 
-            {/* --- نظام روابط التوظيف المخصص حسب الباقة --- */}
-            <Route path="/free-links" element={<FreeLinks />} />
-            <Route path="/premium-links" element={<PremiumLinks />} />
-            <Route path="/gold-links" element={<GoldLinks />} />
-            <Route path="/analysis-links" element={<AnalysisLinks />} />
-            
-            {/* للرجوع الخلفي (Backward Compatibility) */}
-            <Route path="/employer-links" element={<AnalysisLinks />} /> 
+          <ConditionalFooter />
+          <Toaster position="top-center" richColors closeButton />
 
-            {/* الصفحات القانونية */}
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/privacy" element={<Privacy />} />
-
-            {/* صفحة النجاح بعد الدفع */}
-            <Route path="/success" element={<SuccessPage />} />
-
-            <Route path="/contact" element={<ContactPage />} />
-            <Route path="/profile" element={<Profile />} />
-
-            {/* FIXED: إضافة Route لأي مسار غير معرف ليعرض صفحة 404 */}
-            <Route path="*" element={<NotFound />} />
-            
-
-          </Routes>
-        </main>
-
-        {/* الـ Footer سيظهر في أسفل كل الصفحات */}
-        <Footer />
-
-        {/* الإشعارات - FIXED: شلنا الـ Toaster التاني اللي كان بـ MyAccount (حسب نصيحة كلوود) */}
-        {/* هيدا الـ Toaster هون بيكفي لكل المشروع */}
-        <Toaster position="top-center" richColors closeButton />
-      </div>
+        </div>
+        </SidebarProvider>
+      </LanguageProvider>
     </Router>
   );
 }

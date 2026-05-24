@@ -1,4 +1,4 @@
-import { ShieldCheck, Eye, Database, Lock, Globe, Activity, ShieldAlert } from "lucide-react";
+﻿import { ShieldCheck, Eye, Database, Lock, Globe, Activity, ShieldAlert } from "lucide-react";
 
 export default function Privacy() {
   return (
@@ -20,7 +20,7 @@ export default function Privacy() {
             <h1 className="text-4xl lg:text-5xl font-black text-white tracking-tighter uppercase mb-4">Privacy <span className="text-cyber-cyan">Protocol</span></h1>
             <div className="flex items-center justify-center gap-3">
                <Activity className="w-4 h-4 text-cyber-cyan animate-pulse" />
-               <span className="text-[10px] font-black text-cyber-dim uppercase tracking-[0.4em]">Encryption: Active / AES-256</span>
+               <span className="text-[11px] font-black text-cyber-dim uppercase tracking-[0.4em]">Encryption: Active / AES-256</span>
             </div>
           </div>
         </div>
@@ -31,7 +31,7 @@ export default function Privacy() {
           <div className="bg-[rgba(35,113,123,0.08)] backdrop-blur-xl p-10 rounded-[2.5rem] border border-white/5 hover:border-cyber-teal/25 transition-all duration-500 flex flex-col space-y-10">
             <div className="flex items-center gap-3 text-cyber-cyan">
                <Globe className="w-5 h-5" />
-               <span className="text-[10px] font-black uppercase tracking-[0.3em]">International Standards</span>
+               <span className="text-[11px] font-black uppercase tracking-[0.3em]">International Standards</span>
             </div>
 
             <section className="group">
@@ -64,7 +64,7 @@ export default function Privacy() {
           <div className="bg-[rgba(35,113,123,0.08)] backdrop-blur-xl p-10 rounded-[2.5rem] border border-white/5 hover:border-cyber-teal/25 transition-all duration-500 flex flex-col space-y-10 text-right" dir="rtl">
             <div className="flex items-center gap-3 text-cyber-cyan">
                <Globe className="w-5 h-5" />
-               <span className="text-[10px] font-black uppercase tracking-[0.3em]">المعايير الإقليمية</span>
+               <span className="text-[11px] font-black uppercase tracking-[0.3em]">المعايير الإقليمية</span>
             </div>
 
             <section>
@@ -98,7 +98,7 @@ export default function Privacy() {
         {/* Global Security Disclaimer */}
         <div className="mt-16 flex justify-center items-center gap-4 opacity-30 grayscale pointer-events-none">
              <ShieldAlert className="w-4 h-4 text-cyber-cyan" />
-             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white">End-to-End Encrypted Career Infrastructure</span>
+             <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white">End-to-End Encrypted Career Infrastructure</span>
         </div>
 
       </div>

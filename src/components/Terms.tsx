@@ -1,4 +1,4 @@
-import { ShieldAlert, Scale, CreditCard, Lock, FileText, Activity, Globe, AlertTriangle } from "lucide-react";
+﻿import { ShieldAlert, Scale, CreditCard, Lock, FileText, Activity, Globe, AlertTriangle } from "lucide-react";
 
 export default function Terms() {
   return (
@@ -20,7 +20,7 @@ export default function Terms() {
             <h1 className="text-4xl lg:text-5xl font-black text-white tracking-tighter uppercase mb-4">Terms of <span className="text-cyber-muted">Service</span></h1>
             <div className="flex items-center justify-center gap-3">
                <Activity className="w-4 h-4 text-cyber-dim animate-pulse" />
-               <span className="text-[10px] font-black text-cyber-dim uppercase tracking-[0.4em]">Protocol Version 2.0.26</span>
+               <span className="text-[11px] font-black text-cyber-dim uppercase tracking-[0.4em]">Protocol Version 2.0.26</span>
             </div>
           </div>
         </div>
@@ -31,7 +31,7 @@ export default function Terms() {
           <div className="bg-[rgba(35,113,123,0.08)] backdrop-blur-xl p-10 rounded-[2.5rem] border border-white/5 hover:border-white/10 transition-all duration-500 flex flex-col space-y-10">
             <div className="flex items-center gap-3 text-cyber-muted">
                <Globe className="w-5 h-5" />
-               <span className="text-[10px] font-black uppercase tracking-[0.3em]">English Protocol</span>
+               <span className="text-[11px] font-black uppercase tracking-[0.3em]">English Protocol</span>
             </div>
 
             <section>
@@ -45,7 +45,7 @@ export default function Terms() {
             </section>
 
             <section className="bg-white/5 p-6 rounded-2xl border border-white/5 italic">
-              <h3 className="text-[10px] font-black text-cyber-cyan uppercase mb-2">3. External Career Nodes</h3>
+              <h3 className="text-[11px] font-black text-cyber-cyan uppercase mb-2">3. External Career Nodes</h3>
               <p className="text-cyber-dim text-xs leading-relaxed">External links are informational streams only. We hold no authority over 3rd party sites and do not guarantee employment outcomes or content accuracy.</p>
             </section>
 
@@ -64,7 +64,7 @@ export default function Terms() {
           <div className="bg-[rgba(35,113,123,0.08)] backdrop-blur-xl p-10 rounded-[2.5rem] border border-white/5 hover:border-white/10 transition-all duration-500 flex flex-col space-y-10 text-right" dir="rtl">
             <div className="flex items-center gap-3 text-cyber-muted">
                <Globe className="w-5 h-5" />
-               <span className="text-[10px] font-black uppercase tracking-[0.3em]">البروتوكول العربي</span>
+               <span className="text-[11px] font-black uppercase tracking-[0.3em]">البروتوكول العربي</span>
             </div>
 
             <section>
@@ -78,7 +78,7 @@ export default function Terms() {
             </section>
 
             <section className="bg-white/5 p-6 rounded-2xl border border-white/5 italic">
-              <h3 className="text-[10px] font-black text-cyber-cyan uppercase mb-2">٣. روابط التوظيف الخارجية</h3>
+              <h3 className="text-[11px] font-black text-cyber-cyan uppercase mb-2">٣. روابط التوظيف الخارجية</h3>
               <p className="text-cyber-dim text-xs leading-relaxed font-arabic">هذه الروابط مقدمة كخدمة معلوماتية. المنصة لا تملك سلطة قانونية على هذه الجهات ولا تضمن الحصول على وظيفة أو دقة البيانات الخارجية.</p>
             </section>
 
@@ -98,7 +98,7 @@ export default function Terms() {
         {/* Global Compliance Footer */}
         <div className="mt-16 flex justify-center items-center gap-6 opacity-20 grayscale pointer-events-none">
              <AlertTriangle className="w-4 h-4 text-white" />
-             <span className="text-[9px] font-black uppercase tracking-[0.4em] text-white">Governing Law: Lebanese-Egyptian Tech Accord</span>
+             <span className="text-[10px] font-black uppercase tracking-[0.4em] text-white">Governing Law: Lebanese-Egyptian Tech Accord</span>
         </div>
 
       </div>

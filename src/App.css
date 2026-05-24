@@ -1,24 +1,20 @@
+/* ── GLOBAL RESET & LAYOUT FIXES FOR RESUMATION.CO ── */
+
+/* إلغاء حصر وتوسيط المحتوى الافتراضي لـ Vite لفتح الواجهات بكامل الشاشة */
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  text-align: inherit; /* بيخلي النص يتبع اتجاه الـ LTR أو RTL الطبيعي للموقع */
+  display: flex;
+  flex-direction: column;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
+/* ── REFINED INTERACTIVE MICRO-MOVEMENTS ── */
 
-@keyframes logo-spin {
+/* أنيميشن الدوران السلس والبطيء جداً للأيقونات التقنية أو كرات الإضاءة بالخلفية */
+@keyframes tech-spin {
   from {
     transform: rotate(0deg);
   }
@@ -27,16 +23,39 @@
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
+.animate-tech-spin {
+  animation: tech-spin 40s linear infinite;
+}
+
+/* حركة نبض خافتة وسينمائية لأسطح الذكاء الاصطناعي */
+@keyframes ambient-pulse {
+  0%, 100% {
+    opacity: 0.15;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(1.03);
   }
 }
 
-.card {
-  padding: 2em;
+.animate-ambient-glow {
+  animation: ambient-pulse 8s ease-in-out infinite;
 }
 
-.read-the-docs {
-  color: #888;
+/* ── REUSABLE FORM INPUT FOCUS STATES ── */
+
+/* ستايل موحد وفخم جداً للـ Inputs بجميع الفورمات وقت الكتابة */
+.premium-input {
+  background: rgba(13, 17, 23, 0.6);
+  border: 1px solid rgba(60, 80, 125, 0.3);
+  color: #F5F0E9;
+  border-radius: 0.375rem;
+  transition: all 0.3s ease-out;
+}
+
+.premium-input:focus {
+  outline: none;
+  border-color: rgba(18, 178, 193, 0.5);
+  box-shadow: 0 0 15px -3px rgba(18, 178, 193, 0.25), inset 0 0 8px rgba(18, 178, 193, 0.05);
 }
