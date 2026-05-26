@@ -16,17 +16,17 @@ export default function EmployerAccess() {
       const { data: { session } } = await supabase.auth.getSession();
       
       if (session?.user) {
-        // selected_plan was removed from users — read package_name from latest cv_archive
-        const { data: archiveData } = await supabase
-          .from('cv_archive')
+        // package_name lives in order_generations (not cv_archive)
+        const { data: ogData } = await supabase
+          .from('order_generations')
           .select('package_name')
           .eq('user_id', session.user.id)
           .order('created_at_utc', { ascending: false })
           .limit(1)
           .single();
 
-        if (archiveData) {
-          const plan = (archiveData.package_name || 'free').toLowerCase().trim();
+        if (ogData) {
+          const plan = (ogData.package_name || 'free').toLowerCase().trim();
           if (plan !== 'free') {
             setIsUnlocked(true);
           }

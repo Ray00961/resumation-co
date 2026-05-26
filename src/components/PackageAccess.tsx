@@ -24,17 +24,17 @@ export default function PackageAccess() {
   const [loading, setLoading] = useState(true);
 
 
-  // selected_plan was removed from users table — read package_name from latest cv_archive
+  // package_name lives in order_generations (not cv_archive)
   const fetchUserPlan = async (uid: string) => {
-    const { data: archiveData } = await supabase
-      .from('cv_archive')
+    const { data: ogData } = await supabase
+      .from('order_generations')
       .select('package_name')
       .eq('user_id', uid)
       .order('created_at_utc', { ascending: false })
       .limit(1)
       .single();
 
-    const plan = archiveData?.package_name || 'free';
+    const plan = ogData?.package_name || 'free';
     setUserPlan(plan);
 
   };
@@ -51,12 +51,12 @@ export default function PackageAccess() {
       await fetchUserPlan(uid);
       await fetchLatestCV(uid);
 
-      // Listen on cv_archive for package_name changes (e.g. after Make.com upgrade)
+      // Listen on order_generations for package_name changes (written by confirm-payment / webhook-wishmoney)
       userChannel = supabase
         .channel(`user-cv-realtime-${uid}`)
         .on(
           'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'cv_archive', filter: `user_id=eq.${uid}` },
+          { event: 'UPDATE', schema: 'public', table: 'order_generations', filter: `user_id=eq.${uid}` },
           (payload) => {
             if (payload.new.package_name) {
               setUserPlan(payload.new.package_name);

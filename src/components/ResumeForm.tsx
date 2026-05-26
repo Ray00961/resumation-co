@@ -237,6 +237,42 @@ function generateId(len = 7) {
   return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 }
 
+function buildSuggestions(rows: any[]): Record<string, string[]> {
+  const map: Record<string, Set<string>> = {};
+  const add = (key: string, val?: string) => {
+    if (!val?.trim()) return;
+    if (!map[key]) map[key] = new Set();
+    map[key].add(val.trim());
+  };
+  rows.forEach(row => {
+    const cv = row.cv_data ?? {};
+    add("fullName",        cv.fullName);
+    add("cvEmail",         cv.cvEmail);
+    add("linkedin",        cv.linkedin);
+    add("nationality",     cv.nationality);
+    add("targetJob",       cv.targetJob);
+    (cv.workExperience ?? []).forEach((w: any) => {
+      add("jobTitle",      w.jobTitle);
+      add("company",       w.company);
+      add("workLocation",  w.location);
+    });
+    (cv.education ?? []).forEach((e: any) => {
+      add("degree",        e.degree);
+      add("major",         e.major);
+      add("university",    e.university);
+      add("eduLocation",   e.location);
+    });
+    (cv.certificates ?? []).forEach((c: any) => {
+      add("certName",        c.name);
+      add("certInstitution", c.institution);
+    });
+    (cv.projects ?? []).forEach((p: any) => {
+      add("projectTitle",  p.title);
+    });
+  });
+  return Object.fromEntries(Object.entries(map).map(([k, v]) => [k, Array.from(v)]));
+}
+
 const TOTAL_STEPS = 6;
 
 const stepTitles = [
@@ -266,6 +302,13 @@ export default function ResumeForm() {
   const [aiLoading, setAiLoading]                 = useState<number[]>([]);
   const [aiTips, setAiTips]                       = useState<Record<number, string>>({});
   const phoneDropdownRef = useRef<HTMLDivElement>(null);
+
+  // ── Save progress ──
+  const [suggestions,  setSuggestions]  = useState<Record<string, string[]>>({});
+  const [activeField,  setActiveField]  = useState<string | null>(null);
+  const [draftLoaded,  setDraftLoaded]  = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Close phone dropdown on outside click ──
   useEffect(() => {
@@ -348,7 +391,7 @@ export default function ResumeForm() {
       if (archiveId) {
         try {
           const res = await fetch(
-            `${SUPABASE_URL}/rest/v1/cv_archive?id=eq.${archiveId}&user_id=eq.${uid}&select=*`,
+            `${SUPABASE_URL}/rest/v1/cv_archive?form_id=eq.${archiveId}&user_id=eq.${uid}&select=*`,
             { headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader } }
           );
           const rows = await res.json();
@@ -389,39 +432,59 @@ export default function ResumeForm() {
         return; // stop here in edit mode
       }
 
-      // ── NEW MODE: auto-fill basics from users table ──
+      // ── NEW MODE: load draft OR auto-fill from users table ──
+
+      // 1. Fetch suggestions from previous cv_archive rows (non-blocking)
+      fetch(
+        `${SUPABASE_URL}/rest/v1/cv_archive?user_id=eq.${uid}&select=cv_data&order=created_at_utc.desc&limit=10`,
+        { headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader } }
+      ).then(r => r.ok ? r.json() : []).then((rows: any[]) => {
+        if (Array.isArray(rows) && rows.length > 0) setSuggestions(buildSuggestions(rows));
+      }).catch(() => {});
+
+      // 2. Check for saved draft
+      const draftKey = `rsm_draft_${uid}`;
+      const rawDraft = localStorage.getItem(draftKey);
+      if (rawDraft) {
+        try {
+          const { form: savedForm, step: savedStep } = JSON.parse(rawDraft);
+          setForm(savedForm);
+          if (savedStep) setStep(savedStep);
+          setDraftLoaded(true);
+          setDraftRestored(true);
+          return; // skip auto-fill from users table
+        } catch {}
+      }
+      setDraftLoaded(true);
+
+      // 3. Fetch preferred_language only (no form pre-fill from users table)
       try {
         const uRes  = await fetch(
-          `${SUPABASE_URL}/rest/v1/users?id=eq.${uid}&select=first_name,phone_number,cv_email,target_job,preferred_language`,
+          `${SUPABASE_URL}/rest/v1/users?id=eq.${uid}&select=preferred_language`,
           { headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader } }
         );
         const uRows = await uRes.json();
         const u     = Array.isArray(uRows) ? uRows[0] ?? null : null;
-
-        if (u) {
-          if (u.preferred_language === "ar" || u.preferred_language === "en") {
-            setLang(u.preferred_language as "ar" | "en");
-          }
-          const { phoneCode, phoneNum } = parsePhone(u.phone_number || "");
-          setForm(prev => ({
-            ...prev,
-            fullName:  u.first_name  || "",
-            phoneCode,
-            phone:     phoneNum,
-            cvEmail:   u.cv_email    || userEmail,
-            targetJob: u.target_job  || "",
-          }));
-        } else {
-          setForm(prev => ({ ...prev, cvEmail: userEmail }));
+        if (u?.preferred_language === "ar" || u?.preferred_language === "en") {
+          setLang(u.preferred_language as "ar" | "en");
         }
-      } catch (err) {
-        console.error("New-mode user fetch error:", err);
-        setForm(prev => ({ ...prev, cvEmail: userEmail }));
+      } catch {
+        // non-critical
       }
     };
 
     init();
   }, [navigate, archiveId]);
+
+  // ── Auto-save draft to localStorage (new mode only, debounced 800ms) ──
+  useEffect(() => {
+    if (!userId || isEditMode || !draftLoaded) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      localStorage.setItem(`rsm_draft_${userId}`, JSON.stringify({ form, step }));
+    }, 800);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [form, step, userId, isEditMode, draftLoaded]);
 
   // ── Validation ──
   const isStepValid = () => {
@@ -511,10 +574,33 @@ export default function ResumeForm() {
     };
 
     try {
+      // ── Fetch user profile from users table ──
+      let userRow: Record<string, any> = {};
+      try {
+        const uRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/users?id=eq.${userId}&select=username,first_name,last_name,email,preferred_language,region`,
+          { headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader } }
+        );
+        if (uRes.ok) {
+          const uRows = await uRes.json();
+          if (Array.isArray(uRows) && uRows.length > 0) userRow = uRows[0];
+        }
+      } catch { /* non-critical — fallback to empty */ }
+
+      // Shared user columns (from users table)
+      const userColumns = {
+        username:           userRow.username           || null,
+        first_name:         userRow.first_name         || null,
+        last_name:          userRow.last_name          || null,
+        email:              userRow.email              || loginEmail || null,
+        preferred_language: userRow.preferred_language || null,
+        region:             userRow.region             || null,
+      };
+
       if (isEditMode && archiveId) {
         // ── PATCH: update existing cv_archive row ──
         const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/cv_archive?id=eq.${archiveId}&user_id=eq.${userId}`,
+          `${SUPABASE_URL}/rest/v1/cv_archive?form_id=eq.${archiveId}&user_id=eq.${userId}`,
           {
             method: "PATCH",
             headers: {
@@ -524,16 +610,16 @@ export default function ResumeForm() {
               "Prefer": "return=minimal",
             },
             body: JSON.stringify({
-              user_id:          userId,
-              cv_data:          cvData,
-              cv_target_job:    form.targetJob,
-              cv_first_name:    form.fullName.split(' ')[0] || form.fullName,
-              cv_last_name:     form.fullName.split(' ').slice(1).join(' ') || '',
-              email:            loginEmail,
-              cv_email:         form.cvEmail,
-              phone_number:     fullPhone,
-              cv_phone_number:  fullPhone,
-              agreed_to_terms:  true,
+              ...userColumns,
+              user_id:           userId,
+              cv_data:           cvData,
+              cv_target_job:     form.targetJob,
+              cv_first_name:     form.fullName.split(' ')[0] || form.fullName,
+              cv_last_name:      form.fullName.split(' ').slice(1).join(' ') || '',
+              cv_email:          form.cvEmail,
+              phone_number:      fullPhone,
+              cv_phone_number:   fullPhone,
+              agreed_to_terms:   true,
             }),
           }
         );
@@ -545,8 +631,7 @@ export default function ResumeForm() {
 
       } else {
         // ── POST: create new cv_archive row ──
-        const newRowId      = crypto.randomUUID();
-        const submissionId  = generateId();
+        const submissionId = generateId();
         const res = await fetch(`${SUPABASE_URL}/rest/v1/cv_archive`, {
           method: "POST",
           headers: {
@@ -556,20 +641,18 @@ export default function ResumeForm() {
             "Prefer": "return=minimal",
           },
           body: JSON.stringify({
-            id:               newRowId,
-            user_id:          userId,
-            submission_id:    submissionId,
-            cv_data:          cvData,
-            cv_target_job:    form.targetJob,
-            cv_first_name:    form.fullName.split(' ')[0] || form.fullName,
-            cv_last_name:     form.fullName.split(' ').slice(1).join(' ') || '',
-            email:            loginEmail,
-            cv_email:         form.cvEmail,
-            phone_number:     fullPhone,
-            cv_phone_number:  fullPhone,
-            agreed_to_terms:  true,
-            agreed_at:        new Date().toISOString(),
-            package_name:     "free",
+            ...userColumns,
+            user_id:           userId,
+            submission_id:     submissionId,
+            cv_data:           cvData,
+            cv_target_job:     form.targetJob,
+            cv_first_name:     form.fullName.split(' ')[0] || form.fullName,
+            cv_last_name:      form.fullName.split(' ').slice(1).join(' ') || '',
+            cv_email:          form.cvEmail,
+            phone_number:      fullPhone,
+            cv_phone_number:   fullPhone,
+            agreed_to_terms:   true,
+            agreed_at:         new Date().toISOString(),
           }),
         });
         if (!res.ok) {
@@ -577,6 +660,8 @@ export default function ResumeForm() {
           throw new Error(errText);
         }
 
+        // Clear draft after successful submit
+        if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
         navigate(`/dashboard`);
 
         // Non-blocking: sync key fields to profiles (Direct Fetch — SDK banned for profiles)
@@ -631,6 +716,29 @@ export default function ResumeForm() {
       </p>
     ) : null;
 
+  // ── Suggestion dropdown (fires onMouseDown to beat onBlur) ──
+  // activeKey can be "fieldKey" or "fieldKey_index" — we match by prefix
+  const SuggestBox = ({ fieldKey, onSelect }: { fieldKey: string; onSelect: (v: string) => void }) => {
+    const items = suggestions[fieldKey];
+    const isActive = activeField !== null && (activeField === fieldKey || activeField.startsWith(fieldKey + "_"));
+    if (!items?.length || !isActive) return null;
+    return (
+      <div className="mt-1 rounded-lg border border-[rgba(18,178,193,0.2)] bg-[#090E18] overflow-hidden shadow-xl">
+        {items.slice(0, 6).map((val, idx) => (
+          <button
+            key={idx}
+            type="button"
+            onMouseDown={e => { e.preventDefault(); onSelect(val); setActiveField(null); }}
+            className="w-full text-left px-3 py-2 text-[12px] text-[#D9CBC2] hover:bg-[rgba(18,178,193,0.07)] flex items-center gap-2 border-b border-[rgba(86,108,158,0.12)] last:border-0 transition-colors"
+          >
+            <span className="text-[rgba(18,178,193,0.45)] flex-shrink-0">↩</span>
+            <span className="truncate">{val}</span>
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div
       className="min-h-screen bg-[#0D1117] text-[#D9CBC2] py-10 px-4"
@@ -638,6 +746,27 @@ export default function ResumeForm() {
       style={{ fontFamily: isRtl ? "'Tajawal', sans-serif" : "'Plus Jakarta Sans', sans-serif" }}
     >
       <div className="max-w-2xl mx-auto">
+
+        {/* ── Draft restored banner ── */}
+        {draftRestored && !isEditMode && (
+          <div className="flex items-center justify-between mb-4 px-4 py-2.5 bg-[rgba(18,178,193,0.06)] border border-[rgba(18,178,193,0.2)] rounded-xl text-[12px]">
+            <span className="text-[rgba(18,178,193,0.9)] font-semibold flex items-center gap-1.5">
+              ↩ {isRtl ? "تم استعادة المسودة المحفوظة" : "Draft restored — pick up where you left off"}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
+                setDraftRestored(false);
+                setForm({ fullName: "", phoneCode: "+961", phone: "", cvEmail: "", linkedin: "", nationality: "", targetJob: "", work: [{ jobTitle:"", company:"", location:"", startDate:"", endDate:"", responsibilities:"" }], education: [{ degree:"", major:"", university:"", location:"", graduationYear:"" }], technicalSkills: [], langArabic: "", langEnglish: "", langFrench: "", langOther: "", certificates: [], projects: [], agreedToTerms: false });
+                setStep(1);
+              }}
+              className="text-[#7A8FAA] hover:text-red-400 font-semibold transition-colors uppercase tracking-wider text-[10px]"
+            >
+              {isRtl ? "مسح المسودة" : "Clear draft"}
+            </button>
+          </div>
+        )}
 
         {/* ── Header ── */}
         <div className="text-center mb-8">
@@ -691,7 +820,8 @@ export default function ResumeForm() {
           <div className={sectionCls}>
             <div>
               <label className={labelCls}>{isRtl ? "الاسم الكامل *" : "Full Name *"}</label>
-              <input className={inp(form.fullName, true)} value={form.fullName} onChange={e => set("fullName", e.target.value)} placeholder={isRtl ? "مثال: أحمد خليل" : "e.g. Ahmad Khalil"} />
+              <input className={inp(form.fullName, true)} value={form.fullName} onChange={e => set("fullName", e.target.value)} placeholder={isRtl ? "مثال: أحمد خليل" : "e.g. Ahmad Khalil"} onFocus={() => setActiveField("fullName")} onBlur={() => setActiveField(null)} />
+              <SuggestBox fieldKey="fullName" onSelect={v => set("fullName", v)} />
               {errMsg(form.fullName, isRtl ? "الاسم مطلوب" : "Full name is required")}
             </div>
 
@@ -762,24 +892,28 @@ export default function ResumeForm() {
 
             <div>
               <label className={labelCls}>{isRtl ? "بريد السيرة الذاتية *" : "CV Email *"}</label>
-              <input className={inp(form.cvEmail, true)} value={form.cvEmail} onChange={e => set("cvEmail", e.target.value)} placeholder="email@example.com" dir="ltr" />
+              <input className={inp(form.cvEmail, true)} value={form.cvEmail} onChange={e => set("cvEmail", e.target.value)} placeholder="email@example.com" dir="ltr" onFocus={() => setActiveField("cvEmail")} onBlur={() => setActiveField(null)} />
+              <SuggestBox fieldKey="cvEmail" onSelect={v => set("cvEmail", v)} />
               {errMsg(form.cvEmail, isRtl ? "بريد السيرة الذاتية مطلوب" : "CV email is required")}
             </div>
 
             <div>
               <label className={labelCls}>LinkedIn URL</label>
-              <input className={inputCls} value={form.linkedin} onChange={e => set("linkedin", e.target.value)} placeholder="https://linkedin.com/in/..." dir="ltr" />
+              <input className={inputCls} value={form.linkedin} onChange={e => set("linkedin", e.target.value)} placeholder="https://linkedin.com/in/..." dir="ltr" onFocus={() => setActiveField("linkedin")} onBlur={() => setActiveField(null)} />
+              <SuggestBox fieldKey="linkedin" onSelect={v => set("linkedin", v)} />
             </div>
 
             <div>
               <label className={labelCls}>{isRtl ? "الجنسية *" : "Nationality *"}</label>
-              <input className={inp(form.nationality, true)} value={form.nationality} onChange={e => set("nationality", e.target.value)} placeholder={isRtl ? "مثال: لبناني" : "e.g. Lebanese"} />
+              <input className={inp(form.nationality, true)} value={form.nationality} onChange={e => set("nationality", e.target.value)} placeholder={isRtl ? "مثال: لبناني" : "e.g. Lebanese"} onFocus={() => setActiveField("nationality")} onBlur={() => setActiveField(null)} />
+              <SuggestBox fieldKey="nationality" onSelect={v => set("nationality", v)} />
               {errMsg(form.nationality, isRtl ? "الجنسية مطلوبة" : "Nationality is required")}
             </div>
 
             <div>
               <label className={labelCls}>{isRtl ? "المسمى الوظيفي المستهدف *" : "Target Job Title *"}</label>
-              <input className={inp(form.targetJob, true)} value={form.targetJob} onChange={e => set("targetJob", e.target.value)} placeholder={isRtl ? "مثال: مدير تسويق أول" : "e.g. Senior Marketing Manager"} />
+              <input className={inp(form.targetJob, true)} value={form.targetJob} onChange={e => set("targetJob", e.target.value)} placeholder={isRtl ? "مثال: مدير تسويق أول" : "e.g. Senior Marketing Manager"} onFocus={() => setActiveField("targetJob")} onBlur={() => setActiveField(null)} />
+              <SuggestBox fieldKey="targetJob" onSelect={v => set("targetJob", v)} />
               {errMsg(form.targetJob, isRtl ? "المسمى الوظيفي مطلوب" : "Target job title is required")}
             </div>
           </div>
@@ -805,19 +939,22 @@ export default function ResumeForm() {
 
                 <div>
                   <label className={labelCls}>{isRtl ? "المسمى الوظيفي *" : "Job Title *"}</label>
-                  <input className={inp(w.jobTitle, true)} value={w.jobTitle} onChange={e => setWork(i, "jobTitle", e.target.value)} placeholder={isRtl ? "مثال: مدير تسويق" : "e.g. Marketing Manager"} />
+                  <input className={inp(w.jobTitle, true)} value={w.jobTitle} onChange={e => setWork(i, "jobTitle", e.target.value)} placeholder={isRtl ? "مثال: مدير تسويق" : "e.g. Marketing Manager"} onFocus={() => setActiveField(`jobTitle_${i}`)} onBlur={() => setActiveField(null)} />
+                  <SuggestBox fieldKey="jobTitle" onSelect={v => { setWork(i, "jobTitle", v); setActiveField(null); }} />
                   {errMsg(w.jobTitle, isRtl ? "المسمى الوظيفي مطلوب" : "Job title is required")}
                 </div>
 
                 <div>
                   <label className={labelCls}>{isRtl ? "اسم الشركة *" : "Company Name *"}</label>
-                  <input className={inp(w.company, true)} value={w.company} onChange={e => setWork(i, "company", e.target.value)} placeholder={isRtl ? "مثال: جوجل" : "e.g. Google"} />
+                  <input className={inp(w.company, true)} value={w.company} onChange={e => setWork(i, "company", e.target.value)} placeholder={isRtl ? "مثال: جوجل" : "e.g. Google"} onFocus={() => setActiveField(`company_${i}`)} onBlur={() => setActiveField(null)} />
+                  <SuggestBox fieldKey="company" onSelect={v => { setWork(i, "company", v); setActiveField(null); }} />
                   {errMsg(w.company, isRtl ? "اسم الشركة مطلوب" : "Company name is required")}
                 </div>
 
                 <div>
                   <label className={labelCls}>{isRtl ? "الموقع" : "Location"}</label>
-                  <input className={inputCls} value={w.location} onChange={e => setWork(i, "location", e.target.value)} placeholder={isRtl ? "مثال: بيروت، لبنان" : "e.g. Beirut, Lebanon"} />
+                  <input className={inputCls} value={w.location} onChange={e => setWork(i, "location", e.target.value)} placeholder={isRtl ? "مثال: بيروت، لبنان" : "e.g. Beirut, Lebanon"} onFocus={() => setActiveField(`workLocation_${i}`)} onBlur={() => setActiveField(null)} />
+                  <SuggestBox fieldKey="workLocation" onSelect={v => { setWork(i, "location", v); setActiveField(null); }} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -908,21 +1045,25 @@ export default function ResumeForm() {
                 </div>
                 <div>
                   <label className={labelCls}>{isRtl ? "الشهادة *" : "Degree / Certificate *"}</label>
-                  <input className={inp(e.degree, true)} value={e.degree} onChange={ev => setEdu(i, "degree", ev.target.value)} placeholder={isRtl ? "مثال: بكالوريوس" : "e.g. Bachelor's Degree"} />
+                  <input className={inp(e.degree, true)} value={e.degree} onChange={ev => setEdu(i, "degree", ev.target.value)} placeholder={isRtl ? "مثال: بكالوريوس" : "e.g. Bachelor's Degree"} onFocus={() => setActiveField(`degree_${i}`)} onBlur={() => setActiveField(null)} />
+                  <SuggestBox fieldKey="degree" onSelect={v => { setEdu(i, "degree", v); setActiveField(null); }} />
                   {errMsg(e.degree, isRtl ? "الشهادة مطلوبة" : "Degree is required")}
                 </div>
                 <div>
                   <label className={labelCls}>{isRtl ? "التخصص" : "Major / Field of Study"}</label>
-                  <input className={inputCls} value={e.major} onChange={ev => setEdu(i, "major", ev.target.value)} placeholder={isRtl ? "مثال: إدارة الأعمال" : "e.g. Business Administration"} />
+                  <input className={inputCls} value={e.major} onChange={ev => setEdu(i, "major", ev.target.value)} placeholder={isRtl ? "مثال: إدارة الأعمال" : "e.g. Business Administration"} onFocus={() => setActiveField(`major_${i}`)} onBlur={() => setActiveField(null)} />
+                  <SuggestBox fieldKey="major" onSelect={v => { setEdu(i, "major", v); setActiveField(null); }} />
                 </div>
                 <div>
                   <label className={labelCls}>{isRtl ? "الجامعة *" : "University / School *"}</label>
-                  <input className={inp(e.university, true)} value={e.university} onChange={ev => setEdu(i, "university", ev.target.value)} placeholder={isRtl ? "مثال: الجامعة الأمريكية في بيروت" : "e.g. American University of Beirut"} />
+                  <input className={inp(e.university, true)} value={e.university} onChange={ev => setEdu(i, "university", ev.target.value)} placeholder={isRtl ? "مثال: الجامعة الأمريكية في بيروت" : "e.g. American University of Beirut"} onFocus={() => setActiveField(`university_${i}`)} onBlur={() => setActiveField(null)} />
+                  <SuggestBox fieldKey="university" onSelect={v => { setEdu(i, "university", v); setActiveField(null); }} />
                   {errMsg(e.university, isRtl ? "اسم الجامعة مطلوب" : "University name is required")}
                 </div>
                 <div>
                   <label className={labelCls}>{isRtl ? "المدينة والدولة" : "City & Country"}</label>
-                  <input className={inputCls} value={e.location} onChange={ev => setEdu(i, "location", ev.target.value)} placeholder={isRtl ? "مثال: بيروت، لبنان" : "e.g. Beirut, Lebanon"} />
+                  <input className={inputCls} value={e.location} onChange={ev => setEdu(i, "location", ev.target.value)} placeholder={isRtl ? "مثال: بيروت، لبنان" : "e.g. Beirut, Lebanon"} onFocus={() => setActiveField(`eduLocation_${i}`)} onBlur={() => setActiveField(null)} />
+                  <SuggestBox fieldKey="eduLocation" onSelect={v => { setEdu(i, "location", v); setActiveField(null); }} />
                 </div>
                 <div>
                   <label className={labelCls}>{isRtl ? "سنة التخرج" : "Graduation Year"}</label>
