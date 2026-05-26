@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Globe, Zap, ShieldCheck, Crown, Activity, ArrowRight, Check, Sparkles, Search, PenLine, BrainCircuit, Gift } from "lucide-react";
+import { Loader2, Globe, Zap, ShieldCheck, Crown, Activity, ArrowRight, Check, Sparkles, Search, PenLine, BrainCircuit, Gift, CheckCircle2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabase";
 import Cookies from "js-cookie";
@@ -16,6 +16,7 @@ export default function PlansPage() {
   const [userId,          setUserId]          = useState<string | null>(null);
   const [userName,        setUserName]        = useState<string | null>(null);
   const [submissionId,    setSubmissionId]    = useState<string | null>(null);
+  const [formId,          setFormId]          = useState<string | null>(null);
   const [oldSubmissionId, setOldSubmissionId] = useState<string | null>(null);
   const [loading,         setLoading]         = useState<PlanType | null>(null);
   const [payError,        setPayError]        = useState<string | null>(null);
@@ -92,21 +93,43 @@ export default function PlansPage() {
 
         setUserName(userData?.first_name || "User");
 
-        // submission_id always comes from cv_archive (source of truth)
-        let resolvedSubId = idFromUrl || null;
-        if (!resolvedSubId) {
-          const { data: arc } = await supabase
+        // ── Fetch form_id + submission_id + user_id from cv_archive ──
+        let arcRow: { form_id: string; submission_id: string | null; user_id: string } | null = null;
+
+        if (idFromUrl) {
+          // Detect whether idFromUrl is a UUID (form_id) or a short alphanumeric (submission_id)
+          // Mixing them in .or() causes a Postgres UUID type-cast error
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idFromUrl);
+
+          const baseQ = supabase
             .from("cv_archive")
-            .select("submission_id")
+            .select("form_id, submission_id, user_id")
+            .eq("user_id", uid);
+
+          const { data: rows } = isUuid
+            ? await baseQ.eq("form_id", idFromUrl).maybeSingle()
+            : await baseQ.eq("submission_id", idFromUrl).maybeSingle();
+
+          arcRow = rows ?? null;
+        }
+
+        // Fallback: latest row for this user
+        if (!arcRow) {
+          const { data: latest } = await supabase
+            .from("cv_archive")
+            .select("form_id, submission_id, user_id")
             .eq("user_id", uid)
-            .order("id", { ascending: false })
+            .order("created_at_utc", { ascending: false })
             .limit(1)
             .maybeSingle();
-          resolvedSubId = arc?.submission_id || null;
+          arcRow = latest ?? null;
         }
-        if (!resolvedSubId) { navigate("/build"); return; }
 
-        setSubmissionId(resolvedSubId);
+        if (!arcRow) { navigate("/build"); return; }
+
+        setFormId(arcRow.form_id);
+        // Keep submission_id and form_id strictly decoupled — never substitute one for the other
+        setSubmissionId(arcRow.submission_id || "");
         setHasReferral(!!(userData?.referred_by));
 
       } catch (err) {
@@ -121,115 +144,202 @@ export default function PlansPage() {
 
   // ── Payment handler (premium / gold / ai_search) ──
   const handlePaidPlan = async (plan: "premium" | "gold" | "ai_search") => {
-    if (!userId) {
-      setPayError("Session error — please refresh and try again.");
-      return;
-    }
-    const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
-    if (!EF_URL) {
-      setPayError("Config error — please contact support.");
-      return;
-    }
-
-    // Get fresh JWT token for Authorization header
-    const { data: { session: paySession } } = await supabase.auth.getSession();
-    const accessToken = paySession?.access_token;
-    if (!accessToken) {
-      navigate("/login");
-      return;
-    }
-
+    // LOCK the button immediately — before any await — eliminates the double-click race window
     setLoading(plan);
     setPayError(null);
-    const sid = submissionId || "NO_ID";
-    const amt = finalPrice(plan);
-    const cur = isEgypt ? "EGP" : "USD";
-
-    const body = {
-      user_id: userId, email: userEmail, full_name: userName,
-      payment_id: sid, old_sub: oldSubmissionId || null,
-      plan, region: userRegion,
-      amount: amt, original_amount: BASE[plan], currency: cur,
-      has_referral: hasReferral, coins: finalCoins(plan),
-    };
-
-    const authHeaders = {
-      "Content-Type":  "application/json",
-      "Authorization": `Bearer ${accessToken}`,
-    };
 
     try {
+      if (!userId) {
+        setPayError("Session error — please refresh the page.");
+        return;
+      }
+
+      const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
+      if (!EF_URL) {
+        setPayError("Payment endpoint not configured — please contact support.");
+        return;
+      }
+
+      // Get fresh JWT — try Supabase SDK first, fall back to localStorage cache
+      let accessToken: string | undefined;
+      try {
+        const { data: { session: paySession } } = await supabase.auth.getSession();
+        accessToken = paySession?.access_token;
+      } catch { /* fall through */ }
+
+      if (!accessToken) {
+        try {
+          const lsKey = Object.keys(localStorage).find(
+            k => k.startsWith("sb-") && k.endsWith("-auth-token")
+          );
+          if (lsKey) {
+            const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+            accessToken = cached?.access_token || cached?.session?.access_token;
+          }
+        } catch {}
+      }
+
+      if (!accessToken) {
+        setPayError("Session expired — please reload the page.");
+        return;
+      }
+
+      // Keep submission_id and form_id strictly decoupled — never substitute one for the other
+      const sid = submissionId || "";
+      const amt = finalPrice(plan);
+      const cur = isEgypt ? "EGP" : "USD";
+
+      // Core payload — create-cv-order reads form_id, submission_id, payment_method,
+      // plan, email, amount, currency. Extra fields are ignored by the edge function.
+      const body = {
+        user_id:       userId,
+        email:         userEmail,
+        full_name:     userName,
+        form_id:       formId,
+        submission_id: sid,
+        plan,
+        region:        userRegion,
+        amount:        amt,
+        currency:      cur,
+        has_referral:  hasReferral,
+        coins:         finalCoins(plan),
+      };
+
+      const authHeaders = {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${accessToken}`,
+      };
+
       if (isEgypt) {
-        await fetch(EF_URL, {
+        // Paymob path — stateless: create-cv-order validates the form and returns
+        // the standalone payment link + reference context. No generation_id is
+        // created at checkout. confirm-payment is the INSERT engine for Paymob.
+        const paymobRes = await fetch(EF_URL, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ ...body, payment_method: "paymob" }),
+          signal: AbortSignal.timeout(10_000),
         });
+        const paymobResult = await paymobRes.json().catch(() => ({}));
 
+        // Fallback map for standalone links (edge function is the primary source)
         const linkMap: Record<string, string> = {
-          premium: PREMIUM_LINK_EGY, gold: GOLD_LINK_EGY, ai_search: AI_SEARCH_LINK_EGY,
+          premium:   PREMIUM_LINK_EGY,
+          gold:      GOLD_LINK_EGY,
+          ai_search: AI_SEARCH_LINK_EGY,
         };
-        const baseLink = linkMap[plan];
-        if (!baseLink) { setLoading(null); return; }
+        const baseLink = paymobResult?.url || linkMap[plan];
+        if (!baseLink) {
+          setPayError("Payment link not available — please try again.");
+          return;
+        }
 
-        const cid = `${userId}---${sid}`;
+        // Encode form_id in merchant_order_id so confirm-payment can locate the row
+        const resolvedFormId = paymobResult?.form_id || formId || "";
+        const cid = `${userId}---${resolvedFormId}`;
+
+        // Persist the plan tier to sessionStorage so SuccessPage can pass it to
+        // confirm-payment on the cold-redirect path (Paymob doesn't echo plan back).
+        sessionStorage.setItem("rsm_plan", plan);
+
         window.location.href = baseLink
           + `&billing_data[first_name]=${encodeURIComponent(userName || "User")}`
           + `&billing_data[last_name]=Customer`
-          + `&billing_data[email]=${encodeURIComponent(userEmail)}`
+          + `&billing_data[email]=${encodeURIComponent(userEmail || "")}`
           + `&billing_data[phone_number]=01111111111`
           + `&billing_data[street]=${encodeURIComponent(cid)}`
           + `&merchant_order_id=${encodeURIComponent(cid)}`;
 
       } else {
-        const res    = await fetch(EF_URL, {
+        // WishMoney path — stateless: create-cv-order calls WishMoney and returns
+        // the collectUrl. The webhook mints generation_id after payment confirmation.
+        const res = await fetch(EF_URL, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ ...body, payment_method: "whish" }),
+          signal: AbortSignal.timeout(10_000),
         });
         const result = await res.json().catch(() => ({}));
-        const url    = result?.collectUrl || result?.data?.collectUrl || result?.url || result?.paymentUrl;
+        const url = result?.url || result?.collectUrl || result?.data?.collectUrl || result?.paymentUrl;
         if (url) {
           let final = url.trim();
           if (!final.startsWith("http")) final = `https://${final}`;
           window.location.replace(final);
         } else {
           const errMsg = result?.error || result?.message || JSON.stringify(result);
-          console.error("WishMoney no collectUrl:", result);
+          console.error("WishMoney no url:", result);
           setPayError(`Payment gateway error: ${errMsg}`);
         }
       }
-    } catch (err) {
-      console.warn("Payment error:", err);
-      setPayError(`Network error — please try again.`);
+    } catch (err: any) {
+      if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+        setPayError("Payment gateway timed out — please try again.");
+      } else {
+        console.warn("Payment error:", err);
+        setPayError("Network error — please try again.");
+      }
     } finally {
       setLoading(null);
     }
   };
 
   const handleFreePlan = async () => {
-    if (!userEmail) return;
-    const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
-    if (!EF_URL) { navigate("/package-access"); return; }
+    if (!userId || !formId) return;
+
     setLoading("free");
+    setPayError(null);
+
     try {
-      const { data: { session: freeSession } } = await supabase.auth.getSession();
-      const freeToken = freeSession?.access_token;
-      await fetch(EF_URL, {
+      const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
+
+      // Get fresh JWT
+      let accessToken: string | undefined;
+      try {
+        const { data: { session: s } } = await supabase.auth.getSession();
+        accessToken = s?.access_token;
+      } catch { /* fall through */ }
+      if (!accessToken) {
+        try {
+          const lsKey = Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token"));
+          if (lsKey) {
+            const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+            accessToken = cached?.access_token || cached?.session?.access_token;
+          }
+        } catch {}
+      }
+
+      if (!accessToken) {
+        setPayError("Session expired — please reload the page.");
+        return;
+      }
+
+      const res = await fetch(EF_URL, {
         method: "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          ...(freeToken ? { "Authorization": `Bearer ${freeToken}` } : {}),
-        },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
         body: JSON.stringify({
-          user_id: userId,
-          id: submissionId || userEmail, old_sub: oldSubmissionId || null,
-          email: userEmail, plan: "free", region: userRegion,
-          payment_method: "free",
+          user_id: userId, email: userEmail,
+          form_id: formId,
+          payment_id: submissionId || "",
+          plan: "free", payment_method: "free",
         }),
+        signal: AbortSignal.timeout(10_000),
       });
-    } catch {}
-    finally { setLoading(null); navigate("/package-access"); }
+
+      const result = await res.json().catch(() => ({}));
+      // Navigate to building — fid still used by BuildingPage to call generate-free-cv
+      navigate(
+        `/building?sid=${encodeURIComponent(submissionId || formId)}&fid=${encodeURIComponent(formId)}`
+      );
+    } catch (err: any) {
+      if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+        // Even on timeout, navigate — order_generations row might be created
+        navigate(`/building?sid=${encodeURIComponent(submissionId || formId)}&fid=${encodeURIComponent(formId)}`);
+      } else {
+        setPayError("Network error — please try again.");
+      }
+    } finally {
+      setLoading(null);
+    }
   };
 
   // ── Translations ──
@@ -567,12 +677,59 @@ export default function PlansPage() {
 
         </div>
 
-        {/* Free trial text link */}
-        <button onClick={handleFreePlan} disabled={loading !== null}
-          className="mt-8 text-[12px] text-[#e1ebed]/40 hover:text-[#e1ebed]/70 font-medium underline underline-offset-4 transition-colors disabled:opacity-30 flex items-center gap-1.5 mx-auto"
-        >
-          {loading === "free" ? <Loader2 className="animate-spin w-3 h-3" /> : t.freeLink}
-        </button>
+        {/* ── Free Plan Card ── */}
+        <div className="mt-8 relative rounded-3xl p-px transition-all duration-500"
+          style={{ background: "linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))" }}>
+          <div className="rounded-3xl px-8 py-6 flex flex-col md:flex-row md:items-center justify-between gap-6"
+            style={{ background: "rgba(13,17,23,0.7)", backdropFilter: "blur(24px)" }}>
+
+            {/* Left: label + features */}
+            <div className="flex items-start gap-5">
+              <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 mt-0.5"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                <span className="text-lg">🎁</span>
+              </div>
+              <div className={isRtl ? "text-right" : "text-left"}>
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <p className="text-[10px] font-black text-[#7A8FAA] uppercase tracking-[0.2em]">
+                    {isRtl ? "مجاني تماماً" : "Completely Free"}
+                  </p>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/5 text-[#7A8FAA] border border-white/10">
+                    $0
+                  </span>
+                </div>
+                <h3 className="text-base font-black text-white mb-2 tracking-tight">
+                  {isRtl ? "الخطة المجانية" : "Free Plan"}
+                </h3>
+                <div className="flex flex-wrap gap-x-5 gap-y-1">
+                  {(isRtl
+                    ? ["ملخص مهني مخصص", "وظائف مقترحة", "7 نصائح bilingual", "وثيقة Career Strategy"]
+                    : ["Personalized professional summary", "Recommended job roles", "7 bilingual ATS tips", "Career Strategy document"]
+                  ).map(f => (
+                    <span key={f} className="flex items-center gap-1.5 text-[12px] text-[#7A8FAA]">
+                      <CheckCircle2 className="w-3 h-3 text-[#7A8FAA]/50 flex-shrink-0" /> {f}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Right: button */}
+            <button
+              onClick={handleFreePlan}
+              disabled={loading !== null}
+              className="flex-shrink-0 px-7 py-3 rounded-2xl font-black text-[12px] uppercase tracking-widest transition-all duration-300 flex items-center gap-2 disabled:opacity-40 whitespace-nowrap"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#7A8FAA" }}
+              onMouseEnter={e => { const b = e.currentTarget; b.style.background = "rgba(255,255,255,0.09)"; b.style.color = "#F5F0E9"; b.style.borderColor = "rgba(255,255,255,0.15)"; }}
+              onMouseLeave={e => { const b = e.currentTarget; b.style.background = "rgba(255,255,255,0.04)"; b.style.color = "#7A8FAA"; b.style.borderColor = "rgba(255,255,255,0.08)"; }}
+            >
+              {loading === "free"
+                ? <Loader2 className="animate-spin w-4 h-4" />
+                : <>{isRtl ? "ابدأ مجاناً" : "Start Free"} <ArrowRight className="w-4 h-4" /></>
+              }
+            </button>
+          </div>
+        </div>
 
         {/* ══════════════════════════════════════
             Coin Economy Section
