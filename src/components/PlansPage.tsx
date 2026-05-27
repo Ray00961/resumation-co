@@ -17,8 +17,6 @@ export default function PlansPage() {
   const [userName,        setUserName]        = useState<string | null>(null);
   const [submissionId,    setSubmissionId]    = useState<string | null>(null);
   const [formId,          setFormId]          = useState<string | null>(null);
-  // oldSubmissionId retained for URL param read-only; not consumed by current UI
-  // const [oldSubmissionId, setOldSubmissionId] = useState<string | null>(null);
   const [loading,         setLoading]         = useState<PlanType | null>(null);
   const [payError,        setPayError]        = useState<string | null>(null);
   const [isCheckingAuth,  setIsCheckingAuth]  = useState(true);
@@ -38,7 +36,6 @@ export default function PlansPage() {
     ? { premium: 250, gold: 400, ai_search: 100 }
     : { premium: 25,  gold: 40,  ai_search: 10  };
 
-  // AI Search: price is fixed, coins are doubled. Premium/Gold: price halved.
   const finalPrice = (plan: "premium" | "gold" | "ai_search"): number =>
     hasReferral && plan !== "ai_search" ? BASE[plan] / 2 : BASE[plan];
 
@@ -51,28 +48,26 @@ export default function PlansPage() {
   useEffect(() => {
     const params        = new URLSearchParams(window.location.search);
     const idFromUrl     = params.get("id");
-    const oldSubFromUrl = params.get("old_sub");  // read for future use; not consumed yet
-    void oldSubFromUrl;
-
+    
     // Hard bailout — never leave user stuck on spinner
     const bailout = setTimeout(() => setIsCheckingAuth(false), 8000);
 
     const init = async () => {
       try {
-        // Read session from localStorage first (same pattern as Dashboard — avoids getSession() timing issues)
         const lsKey = Object.keys(localStorage).find(
           k => k.startsWith("sb-") && k.endsWith("-auth-token")
         );
         let uid: string | null = null;
         let email: string | null = null;
+        
         if (lsKey) {
           try {
             const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
             uid   = cached?.user?.id   || null;
             email = cached?.user?.email || cached?.user?.user_metadata?.email || null;
-          } catch { /* ignore parse errors — falls through to getSession() */ }
+          } catch { /* ignore parse errors */ }
         }
-        // Fallback to getSession() if localStorage didn't have it
+        
         if (!uid) {
           const { data: { session } } = await supabase.auth.getSession();
           uid   = session?.user?.id   || null;
@@ -83,9 +78,6 @@ export default function PlansPage() {
         setUserId(uid);
         setUserEmail(email || "");
 
-        // Region detection — non-blocking
-        // Sanitize geolocation codes: "BA" (Beirut Governorate ISO sub-code) and
-        // "Beirut" (city-level string) both map to the canonical country code "LB".
         detectRegion()
           .then(r => {
             setUserRegion(r);
@@ -104,26 +96,17 @@ export default function PlansPage() {
 
         setUserName(userData?.first_name || "User");
 
-        // ── Fetch form_id + submission_id + user_id from cv_archive ──
         let arcRow: { form_id: string; submission_id: string | null; user_id: string } | null = null;
 
         if (idFromUrl) {
-          // Detect whether idFromUrl is a UUID (form_id) or a short alphanumeric (submission_id)
           const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idFromUrl);
-
-          const baseQ = supabase
-            .from("cv_archive")
-            .select("form_id, submission_id, user_id")
-            .eq("user_id", uid);
-
+          const baseQ = supabase.from("cv_archive").select("form_id, submission_id, user_id").eq("user_id", uid);
           const { data: matched } = isUuid
             ? await baseQ.eq("form_id", idFromUrl).maybeSingle()
             : await baseQ.eq("submission_id", idFromUrl).maybeSingle();
-
           arcRow = matched ?? null;
         }
 
-        // Fallback: latest row for this user
         if (!arcRow) {
           const { data: latest } = await supabase
             .from("cv_archive")
@@ -153,7 +136,6 @@ export default function PlansPage() {
 
   // ── Payment handler (premium / gold / ai_search) ──
   const handlePaidPlan = async (plan: "premium" | "gold" | "ai_search") => {
-    // LOCK the button immediately — before any await — eliminates the double-click race window
     setLoading(plan);
     setPayError(null);
 
@@ -164,28 +146,51 @@ export default function PlansPage() {
         return;
       }
 
-      // Hardcoded fallback guarantees the endpoint is always resolvable even if
-      // the VITE_ env var is absent from the deployment environment.
+      let safeFormId   = formId || "";
+      let safeSid      = submissionId || "";
+
+      // 🚨 BULLETPROOF FALLBACK: فحص طوارئ لجلب ה־ ID إذا كان مفقوداً من ה־ React State
+      if (!safeFormId) {
+        const { data } = await supabase
+          .from("cv_archive")
+          .select("form_id, submission_id")
+          .eq("user_id", userId)
+          .order("created_at_utc", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (data) {
+          safeFormId = data.form_id;
+          safeSid    = data.submission_id || "";
+          setFormId(safeFormId);
+          setSubmissionId(safeSid);
+        } else {
+          setPayError("System Error: CV data not found. Please try again.");
+          setLoading(null);
+          return;
+        }
+      }
+
       const EF_URL = (import.meta.env.VITE_EF_CREATE_CV_ORDER as string) ||
         "https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/create-cv-order";
 
-      // Get fresh JWT — try Supabase SDK first, fall back to localStorage cache
       let accessToken: string | undefined;
+
       try {
-        const { data: { session: paySession } } = await supabase.auth.getSession();
-        accessToken = paySession?.access_token;
-      } catch { /* fall through */ }
+        const lsKey = Object.keys(localStorage).find(
+          k => k.startsWith("sb-") && k.endsWith("-auth-token")
+        );
+        if (lsKey) {
+          const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+          accessToken = cached?.access_token || cached?.session?.access_token;
+        }
+      } catch { /* تجاهل الأخطاء */ }
 
       if (!accessToken) {
         try {
-          const lsKey = Object.keys(localStorage).find(
-            k => k.startsWith("sb-") && k.endsWith("-auth-token")
-          );
-          if (lsKey) {
-            const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
-            accessToken = cached?.access_token || cached?.session?.access_token;
-          }
-        } catch { /* localStorage may be unavailable in some browsers — ignore */ }
+          const { data: { session: paySession } } = await supabase.auth.getSession();
+          accessToken = paySession?.access_token;
+        } catch { /* fall through */ }
       }
 
       if (!accessToken) {
@@ -194,21 +199,15 @@ export default function PlansPage() {
         return;
       }
 
-      // ── Runtime Fallback Sanitization to prevent Javascript crash ──
-      const safeUserId   = userId || "";
       const safeEmail    = userEmail || "";
       const safeName     = userName || "User";
-      const safeFormId   = formId || "";
-      const safeSid      = submissionId || "";
-      // detectRegion() already returns a sanitized Region ("EG" | "LB") — no extra guard needed.
-      const safeRegion = userRegion || "LB";
+      const safeRegion   = userRegion || "LB";
 
       const amt = finalPrice(plan);
       const cur = isEgypt ? "EGP" : "USD";
 
-      // Core payload — values guaranteed to be non-null strings
       const body = {
-        user_id:       safeUserId,
+        user_id:       userId,
         email:         safeEmail,
         full_name:     safeName,
         form_id:       safeFormId,
@@ -235,8 +234,6 @@ export default function PlansPage() {
         });
         const paymobResult = await paymobRes.json().catch(() => ({}));
 
-        // Only fall back to the static link if the EF failed — a successful EF
-        // response always includes a url with the correct merchant_order_id.
         if (!paymobRes.ok && !paymobResult?.url) {
           setPayError(paymobResult?.error || paymobResult?.message || "Payment gateway error — please try again.");
           setLoading(null);
@@ -256,7 +253,7 @@ export default function PlansPage() {
         }
 
         const resolvedFormId = paymobResult?.form_id || safeFormId;
-        const cid = `${safeUserId}---${resolvedFormId}`;
+        const cid = `${userId}---${resolvedFormId}`;
 
         sessionStorage.setItem("rsm_plan", plan);
 
@@ -300,70 +297,41 @@ export default function PlansPage() {
     }
   };
 
+  // ── التعديل الجديد السريع לزر الخطة المجانية ──
   const handleFreePlan = async () => {
-    if (!userId || !formId) return;
-
     setLoading("free");
     setPayError(null);
 
-    try {
-      const EF_URL = (import.meta.env.VITE_EF_CREATE_CV_ORDER as string) ||
-        "https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/create-cv-order";
+    let safeFormId = formId || "";
+    let safeSid = submissionId || "";
 
-      let accessToken: string | undefined;
-      try {
-        const { data: { session: s } } = await supabase.auth.getSession();
-        accessToken = s?.access_token;
-      } catch { /* fall through */ }
-      if (!accessToken) {
-        try {
-          const lsKey = Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token"));
-          if (lsKey) {
-            const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
-            accessToken = cached?.access_token || cached?.session?.access_token;
-          }
-        } catch { /* localStorage may be unavailable in some browsers — ignore */ }
-      }
+    // فحص احتياطي لضمان الروابط الصحيحة لصفحة البناء
+    if (!safeFormId && userId) {
+      const { data } = await supabase
+        .from("cv_archive")
+        .select("form_id, submission_id")
+        .eq("user_id", userId)
+        .order("created_at_utc", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (!accessToken) {
-        setPayError("Session expired — please reload the page.");
-        setLoading(null);
-        return;
+      if (data) {
+        safeFormId = data.form_id;
+        safeSid = data.submission_id || "";
+        setFormId(safeFormId);
       }
-
-      const res = await fetch(EF_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
-        body: JSON.stringify({
-          user_id: userId, email: userEmail || "",
-          form_id: formId,
-          submission_id: submissionId || "",
-          plan: "free", payment_method: "free",
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-
-      const result = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPayError(result?.error || result?.message || "Something went wrong — please try again.");
-        setLoading(null);
-        return;
-      }
-      const safeFid = formId ?? "";
-      navigate(
-        `/building?sid=${encodeURIComponent(submissionId || safeFid)}&fid=${encodeURIComponent(safeFid)}`
-      );
-    } catch (err: unknown) {
-      const e = err as { name?: string };
-      const safeFid = formId ?? "";
-      if (e?.name === "TimeoutError" || e?.name === "AbortError") {
-        navigate(`/building?sid=${encodeURIComponent(submissionId || safeFid)}&fid=${encodeURIComponent(safeFid)}`);
-      } else {
-        setPayError("Network error — please try again.");
-      }
-    } finally {
-      setLoading(null);
     }
+
+    if (!safeFormId) {
+      setPayError("Could not find your CV. Please try reloading the page.");
+      setLoading(null);
+      return;
+    }
+
+    // نقل مباشر لصفحة البناء بعد تأخير بسيط للأنيميشن
+    setTimeout(() => {
+      navigate(`/building?sid=${encodeURIComponent(safeSid)}&fid=${encodeURIComponent(safeFormId)}`);
+    }, 600);
   };
 
   // ── Translations ──
