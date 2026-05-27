@@ -399,7 +399,7 @@ Deno.serve(async (req) => {
         .from("cv_archive")
         .select("form_id")
         .eq("user_id", user_id)
-        .order("created_at", { ascending: false })
+        .order("created_at_utc", { ascending: false })
         .limit(1)
         .maybeSingle();
 

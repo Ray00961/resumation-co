@@ -286,26 +286,23 @@ Deno.serve(async (req) => {
     });
   }
 
-  const db         = createClient(SUPABASE_URL, SERVICE_KEY);
-  const isInternal = token === SERVICE_KEY;
-  let callerUid: string | null = null;
+  const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
-  if (!isInternal) {
-    const authDb = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!);
-    const { data: { user }, error } = await authDb.auth.getUser(token);
-    if (error || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...cors, "Content-Type": "application/json" },
-      });
-    }
-    callerUid = user.id;
+  // JWT verification is mandatory for all callers — no internal bypass.
+  const authDb = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!);
+  const { data: { user }, error: authErr } = await authDb.auth.getUser(token);
+  if (authErr || !user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...cors, "Content-Type": "application/json" },
+    });
   }
+  const callerUid = user.id;
 
   try {
     // ── Step A: Parse request ──
     // generation_id = PK of order_generations (preferred, created by create-cv-order)
     // form_id       = fallback (for legacy calls before order_generations existed)
-    const { generation_id, submission_id, form_id, user_id } = await req.json();
+    const { generation_id, submission_id, form_id } = await req.json();
 
     if (!generation_id && !form_id && !submission_id) {
       return new Response(
@@ -366,6 +363,41 @@ Deno.serve(async (req) => {
       );
     }
 
+    // ── Step B.5: Cache hit check ─────────────────────────────────────────────
+    // If cv_file_path (HTML) and cv_pdf_url (DOCX) already exist in
+    // order_generations, the free CV was already generated for this session.
+    // Return the stored result immediately — do NOT call OpenAI again.
+    // This prevents re-generation on page refresh, double-click, or network retry.
+    if (resolvedGenId) {
+      const { data: cachedRow } = await db
+        .from("order_generations")
+        .select("cv_file_path, cv_pdf_url, user_id")
+        .eq("generation_id", resolvedGenId)
+        .maybeSingle();
+
+      if (cachedRow?.cv_file_path && cachedRow?.cv_pdf_url) {
+        // Ownership check even on cache hit
+        if (cachedRow.user_id !== callerUid) {
+          return new Response(JSON.stringify({ error: "Access denied" }), {
+            status: 403, headers: { ...cors, "Content-Type": "application/json" },
+          });
+        }
+        console.log("generate-free-cv: cache hit — returning stored result", {
+          generation_id: resolvedGenId,
+        });
+        return new Response(
+          JSON.stringify({
+            success:    true,
+            htmlResult: cachedRow.cv_file_path,
+            fileUrl:    cachedRow.cv_pdf_url,
+            cached:     true,
+          }),
+          { headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+    }
+    // ── Cache miss — proceed to full generation ───────────────────────────────
+
     // ── Step C: Fetch cv_archive row for cv_data ─────────────────────────────────
     const { data: record, error: fetchErr } = await db
       .from("cv_archive")
@@ -380,8 +412,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Ownership check
-    if (!isInternal && record.user_id !== callerUid) {
+    // Ownership check — always enforced
+    if (record.user_id !== callerUid) {
       return new Response(JSON.stringify({ error: "Access denied" }), {
         status: 403, headers: { ...cors, "Content-Type": "application/json" },
       });
@@ -393,7 +425,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const uid   = record.user_id || user_id || callerUid;
+    const uid   = record.user_id;
     const subId = record.submission_id || submission_id || resolvedFormId;
     const filePrefix = resolvedGenId || resolvedFormId;  // generation_id preferred
 

@@ -156,10 +156,16 @@ export default function BuildingPage() {
     const run = async () => {
       try {
         // ── Check existing: skip API call if already generated ──
+        // generate-free-cv writes cv_file_path (HTML) + cv_pdf_url (DOCX signed URL)
+        // into order_generations — NOT cv_archive. Filtering package_name = "free"
+        // avoids accidentally matching a paid-plan row for the same form.
         const { data: existing } = await supabase
-          .from("cv_archive")
+          .from("order_generations")
           .select("cv_file_path, cv_pdf_url")
           .eq("form_id", fid)
+          .eq("package_name", "free")
+          .order("created_at_utc", { ascending: false })
+          .limit(1)
           .maybeSingle();
 
         if (existing?.cv_file_path && existing?.cv_pdf_url) {
@@ -218,8 +224,8 @@ export default function BuildingPage() {
   // PAID PLAN EFFECT
   // Anchored exclusively to generation_id (gid) — the PK of order_generations.
   // Using .single() is safe: generation_id is a UUID primary key; exactly one
-  // row can ever match. Cross-wiring with old free or abandoned records is
-  // mathematically impossible because order_generations only contains paid rows.
+  // row can ever match. order_generations holds both free (package_name="free")
+  // and paid rows; the gid from the URL always references the correct paid row.
   // ══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (isFree) return;
