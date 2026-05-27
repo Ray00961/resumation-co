@@ -88,9 +88,8 @@ export default function PlansPage() {
         // "Beirut" (city-level string) both map to the canonical country code "LB".
         detectRegion()
           .then(r => {
-            const sanitizedRegion = (r === "BA" || r === "Beirut" || !r) ? "LB" : r;
-            setUserRegion(sanitizedRegion);
-            Cookies.set("user_region", sanitizedRegion, { expires: 30 });
+            setUserRegion(r);
+            Cookies.set("user_region", r, { expires: 30 });
           })
           .catch(() => {
             setUserRegion("LB");
@@ -201,10 +200,8 @@ export default function PlansPage() {
       const safeName     = userName || "User";
       const safeFormId   = formId || "";
       const safeSid      = submissionId || "";
-      // Enforce canonical country code — geolocation can return "BA" (Beirut
-      // Governorate ISO sub-code) or "Beirut" (city string); both must become "LB".
-      const currentRegion = userRegion || "LB";
-      const safeRegion    = (currentRegion === "BA" || currentRegion === "Beirut") ? "LB" : currentRegion;
+      // detectRegion() already returns a sanitized Region ("EG" | "LB") — no extra guard needed.
+      const safeRegion = userRegion || "LB";
 
       const amt = finalPrice(plan);
       const cur = isEgypt ? "EGP" : "USD";
