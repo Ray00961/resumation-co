@@ -8,8 +8,8 @@ const cors = {
 const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_KEY       = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WISHMONEY_CHANNEL = Deno.env.get("WISHMONEY_CHANNEL") ?? "10199400";
-const WISHMONEY_SECRET  = Deno.env.get("WISHMONEY_SECRET")  ?? "236772b507004bac8ba8b2cbf9886c4c";
+const WISHMONEY_CHANNEL = Deno.env.get("WISHMONEY_CHANNEL") ?? "";
+const WISHMONEY_SECRET  = Deno.env.get("WISHMONEY_SECRET")  ?? "";
 const _WM_BASE          = (Deno.env.get("WISHMONEY_API_URL") ?? "https://api.sandbox.whish.money/itel-service/api").replace(/\/+$/, "");
 const WISHMONEY_API     = _WM_BASE.endsWith("/payment/whish") ? _WM_BASE : `${_WM_BASE}/payment/whish`;
 const EF_BASE_URL       = `${SUPABASE_URL}/functions/v1`;
@@ -19,6 +19,24 @@ const PAYMOB_LINKS: Record<string, string> = {
   gold:      "https://accept.paymobsolutions.com/standalone?ref=p_LRR2U0d0ZklEUlIxZUwweWZhUVRGdDVqZz09X1hhTCtGYWhhK1pOSmVyb0pZVFE1dXc9PQ",
   ai_search: Deno.env.get("PAYMOB_AI_SEARCH_LINK") ?? "",
 };
+
+// ── HMAC-SHA256 utility (Deno Web Crypto API) ─────────────────────────────────
+// Produces a lowercase hex digest of HMAC-SHA256(secret, message).
+// Used to mint per-transaction webhook tokens embedded in WishMoney callback URLs.
+async function hmacSha256Hex(secret: string, message: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -102,21 +120,42 @@ Deno.serve(async (req) => {
     // after confirmed payment. No database row is created here.
     // ════════════════════════════════════════════════════════════════════════════
     if (normalizedMethod === "whish" || normalizedMethod === "wishmoney") {
+      if (!WISHMONEY_SECRET) {
+        console.error("create-cv-order: WISHMONEY_SECRET is not configured");
+        return new Response(
+          JSON.stringify({ error: "Payment gateway not configured" }),
+          { status: 503, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+
       const wmExternalId = Date.now();
+
+      // ── Per-transaction HMAC webhook token ────────────────────────────────────
+      // token = HMAC-SHA256(WISHMONEY_SECRET, "${wmExternalId}:${form_id}")
+      // Embedded as `wt` in every callback/redirect URL so webhook-wishmoney can
+      // verify the request is genuine before touching any database row.
+      // WishMoney echoes the callback URL as-is for both POST callbacks and GET
+      // browser redirects, so the same token covers both paths.
+      const webhookToken = await hmacSha256Hex(
+        WISHMONEY_SECRET,
+        `${wmExternalId}:${form_id}`,
+      );
 
       // Callback URL carries the reference context only — no generation_id yet.
       // webhook-wishmoney uses these params to:
-      //   1. verify idempotency via wishmoney_order_id (= tid)
-      //   2. extract cv_archive snapshot via fid
-      //   3. INSERT into order_generations and mint generation_id
-      //   4. redirect browser to /success?gid=<minted_gid>
+      //   1. verify HMAC token (wt) — rejects anything that fails
+      //   2. verify idempotency via wishmoney_order_id (= tid)
+      //   3. extract cv_archive snapshot via fid
+      //   4. INSERT into order_generations and mint generation_id
+      //   5. redirect browser to /success?gid=<minted_gid>
       const baseCallback =
         `${EF_BASE_URL}/webhook-wishmoney` +
         `?sid=${encodeURIComponent(submission_id)}` +
         `&fid=${encodeURIComponent(form_id)}` +
         `&tid=${wmExternalId}` +
         `&plan=${encodeURIComponent(plan)}` +
-        `&amount=${encodeURIComponent(String(amount ?? ""))}`;
+        `&amount=${encodeURIComponent(String(amount ?? ""))}` +
+        `&wt=${webhookToken}`;
 
       const wmRes = await fetch(WISHMONEY_API, {
         method: "POST",

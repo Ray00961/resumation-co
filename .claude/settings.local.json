@@ -5,7 +5,10 @@
       "Bash(npm run *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "mcp__db8dee0b-7ef2-44aa-93ae-9e2f2bce6cd6__list_projects",
+      "mcp__db8dee0b-7ef2-44aa-93ae-9e2f2bce6cd6__list_edge_functions",
+      "mcp__db8dee0b-7ef2-44aa-93ae-9e2f2bce6cd6__deploy_edge_function"
     ]
   }
 }
