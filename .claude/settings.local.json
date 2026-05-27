@@ -13,7 +13,8 @@
       "mcp__db8dee0b-7ef2-44aa-93ae-9e2f2bce6cd6__execute_sql",
       "Bash(Get-Content \"C:\\\\Users\\\\Pc\\\\OneDrive\\\\Desktop\\\\AI CV PROJECT\\\\Resumation.co\\\\supabase\\\\functions\\\\generate-cv\\\\index.ts\" -Raw)",
       "Bash(Measure-Object -Character)",
-      "Bash(Select-Object -ExpandProperty Characters)"
+      "Bash(Select-Object -ExpandProperty Characters)",
+      "Bash(npx supabase *)"
     ]
   }
 }

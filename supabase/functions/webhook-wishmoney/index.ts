@@ -414,13 +414,13 @@ Deno.serve(async (req) => {
     const coinsToAdd = PLAN_COINS[plan] ?? 0;
 
     if (coinsToAdd > 0 && archiveRow.user_id) {
-      // award_coins(p_user_id, p_amount, p_reason) — service_role only, no p_reference
+      // award_coins(p_user_id uuid, p_plan text, p_reference text DEFAULT NULL)
       await db.rpc("award_coins", {
-        p_user_id: archiveRow.user_id,
-        p_amount:  coinsToAdd,
-        p_reason:  `plan_purchase_${plan}`,
+        p_user_id:   archiveRow.user_id,
+        p_plan:      plan,
+        p_reference: generation_id,
       }).catch(async () => {
-        // Fallback: direct update if award_coins RPC is not available
+        // Fallback: direct update if award_coins RPC is unavailable
         const { data: usr } = await db
           .from("users")
           .select("search_coins")
@@ -433,12 +433,11 @@ Deno.serve(async (req) => {
           .update({ search_coins: current + coinsToAdd })
           .eq("id", archiveRow.user_id);
 
-        // coin_transactions schema: id, user_id, amount, reason, created_at
-        // NOTE: no "reference" column exists in this table.
         await db.from("coin_transactions").insert({
-          user_id: archiveRow.user_id,
-          amount:  coinsToAdd,
-          reason:  `plan_purchase_${plan}`,
+          user_id:   archiveRow.user_id,
+          amount:    coinsToAdd,
+          reason:    `plan_purchase_${plan}`,
+          reference: generation_id,
         });
       });
     }

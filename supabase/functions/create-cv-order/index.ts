@@ -71,15 +71,33 @@ Deno.serve(async (req) => {
       currency  = "USD",
     } = body;
 
+    const normalizedMethod = payment_method?.toLowerCase() ?? "";
+
+    console.log("create-cv-order: received", {
+      hasFormId:     !!bodyFormId,
+      formIdLen:     String(bodyFormId ?? "").length,
+      hasSubId:      !!rawSub,
+      paymentMethod: normalizedMethod,
+      plan,
+      userId:        user_id,
+    });
+
     if (!bodyFormId && !rawSub) {
+      console.error("create-cv-order 400: missing ids", {
+        bodyFormId: String(bodyFormId ?? ""),
+        rawSub:     String(rawSub ?? ""),
+      });
       return new Response(
         JSON.stringify({ error: "form_id or submission_id required" }),
         { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
 
-    const normalizedMethod = payment_method?.toLowerCase() ?? "";
     if (normalizedMethod !== "whish" && normalizedMethod !== "wishmoney" && normalizedMethod !== "paymob") {
+      console.error("create-cv-order 400: invalid payment_method", {
+        normalizedMethod,
+        raw: payment_method,
+      });
       return new Response(
         JSON.stringify({ error: "payment_method must be 'whish', 'wishmoney', or 'paymob'" }),
         { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
