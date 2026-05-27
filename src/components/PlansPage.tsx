@@ -83,7 +83,18 @@ export default function PlansPage() {
         setUserEmail(email || "");
 
         // Region detection — non-blocking
-        detectRegion().then(r => setUserRegion(r)).catch(() => {});
+        // Sanitize geolocation codes: "BA" (Beirut Governorate ISO sub-code) and
+        // "Beirut" (city-level string) both map to the canonical country code "LB".
+        detectRegion()
+          .then(r => {
+            const sanitizedRegion = (r === "BA" || r === "Beirut" || !r) ? "LB" : r;
+            setUserRegion(sanitizedRegion);
+            Cookies.set("user_region", sanitizedRegion, { expires: 30 });
+          })
+          .catch(() => {
+            setUserRegion("LB");
+            Cookies.set("user_region", "LB", { expires: 30 });
+          });
 
         const { data: userData } = await supabase
           .from("users")
@@ -189,7 +200,10 @@ export default function PlansPage() {
       const safeName     = userName || "User";
       const safeFormId   = formId || "";
       const safeSid      = submissionId || "";
-      const safeRegion   = userRegion || "LB";
+      // Enforce canonical country code — geolocation can return "BA" (Beirut
+      // Governorate ISO sub-code) or "Beirut" (city string); both must become "LB".
+      const currentRegion = userRegion || "LB";
+      const safeRegion    = (currentRegion === "BA" || currentRegion === "Beirut") ? "LB" : currentRegion;
 
       const amt = finalPrice(plan);
       const cur = isEgypt ? "EGP" : "USD";
