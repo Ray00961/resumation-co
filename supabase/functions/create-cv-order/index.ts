@@ -5,127 +5,200 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_KEY       = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const WISHMONEY_CHANNEL = Deno.env.get("WISHMONEY_CHANNEL") ?? "10199400";
-const WISHMONEY_SECRET  = Deno.env.get("WISHMONEY_SECRET") ?? "";
-const WISHMONEY_API     = Deno.env.get("WISHMONEY_API_URL") ?? "https://api.whish.money/itel-service/api/payment/whish";
+const WISHMONEY_SECRET  = Deno.env.get("WISHMONEY_SECRET")  ?? "236772b507004bac8ba8b2cbf9886c4c";
+const _WM_BASE          = (Deno.env.get("WISHMONEY_API_URL") ?? "https://api.sandbox.whish.money/itel-service/api").replace(/\/+$/, "");
+const WISHMONEY_API     = _WM_BASE.endsWith("/payment/whish") ? _WM_BASE : `${_WM_BASE}/payment/whish`;
 const EF_BASE_URL       = `${SUPABASE_URL}/functions/v1`;
+
+const PAYMOB_LINKS: Record<string, string> = {
+  premium:   "https://accept.paymobsolutions.com/standalone?ref=p_LRR2djFVeWg0SWhkQzY2dnM3WGQxOFl6Zz09X05IeWQra29pd29zUXRTRHF5QkpxMWc9PQ",
+  gold:      "https://accept.paymobsolutions.com/standalone?ref=p_LRR2U0d0ZklEUlIxZUwweWZhUVRGdDVqZz09X1hhTCtGYWhhK1pOSmVyb0pZVFE1dXc9PQ",
+  ai_search: Deno.env.get("PAYMOB_AI_SEARCH_LINK") ?? "",
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
+  // ── JWT verification — user_id always from server-side auth, never from body ──
+  const authHeader = req.headers.get("Authorization") ?? "";
+  if (!authHeader.startsWith("Bearer ")) {
+    return new Response(JSON.stringify({ error: "Missing authorization header" }), {
+      status: 401, headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  const token = authHeader.slice(7);
+
+  const authDb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const { data: { user }, error: authErr } = await authDb.auth.getUser(token);
+  if (authErr || !user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  const user_id = user.id;
+
   try {
     const body = await req.json();
     const {
-      user_id, email, full_name,
-      // submission_id may come as "payment_id" (paid) or "id" (free)
-      payment_id, id: freeId,
-      plan = "free", region = "LB",
-      amount, currency = "USD",
-      payment_method = "free",
-      has_referral = false,
-      coins = 0,
+      form_id:       bodyFormId,
+      submission_id: rawSub,
+      payment_method,
+      plan      = "premium",
+      email     = "",
+      amount,
+      currency  = "USD",
     } = body;
 
-    const submission_id: string = payment_id || freeId || "";
-    if (!user_id || !submission_id) {
-      return new Response(JSON.stringify({ error: "user_id and submission_id required" }), {
-        status: 400, headers: { ...cors, "Content-Type": "application/json" },
-      });
+    if (!bodyFormId && !rawSub) {
+      return new Response(
+        JSON.stringify({ error: "form_id or submission_id required" }),
+        { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
+      );
     }
 
+    const normalizedMethod = payment_method?.toLowerCase() ?? "";
+    if (normalizedMethod !== "whish" && normalizedMethod !== "wishmoney" && normalizedMethod !== "paymob") {
+      return new Response(
+        JSON.stringify({ error: "payment_method must be 'whish', 'wishmoney', or 'paymob'" }),
+        { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Read-only snapshot from cv_archive — verify the form exists and belongs to this user ──
+    // This is the ONLY database operation in this function. No writes occur anywhere below.
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // Upsert cv_archive record
-    await db.from("cv_archive").upsert({
-      user_id,
-      submission_id,
-      email,
-      package_name: plan,
-      payment_method: payment_method === "free" ? "free" : payment_method,
-    }, { onConflict: "submission_id", ignoreDuplicates: false });
+    const q = db
+      .from("cv_archive")
+      .select("form_id, submission_id, user_id")
+      .eq("user_id", user_id);
 
+    const { data: archiveRow, error: archErr } = bodyFormId
+      ? await q.eq("form_id", bodyFormId).maybeSingle()
+      : await q
+          .eq("submission_id", rawSub)
+          .order("created_at_utc", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-
-    // ── FREE PLAN: trigger generate-cv immediately ──
-    if (plan === "free" || payment_method === "free") {
-      // Fire-and-forget generation
-      fetch(`${EF_BASE_URL}/generate-cv`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${SERVICE_KEY}`,
-        },
-        body: JSON.stringify({ submission_id, user_id, plan: "free" }),
-      }).catch(e => console.error("generate-cv dispatch failed:", e));
-
-      return new Response(JSON.stringify({ success: true, plan: "free" }), {
-        headers: { ...cors, "Content-Type": "application/json" },
-      });
+    if (archErr || !archiveRow) {
+      return new Response(
+        JSON.stringify({ error: "cv_archive row not found or access denied" }),
+        { status: 404, headers: { ...cors, "Content-Type": "application/json" } }
+      );
     }
 
-    // ── EGYPT / PAYMOB: just record intent, frontend uses static link ──
-    if (payment_method === "paymob") {
-      return new Response(JSON.stringify({ success: true, plan, payment_method: "paymob" }), {
-        headers: { ...cors, "Content-Type": "application/json" },
-      });
-    }
+    const form_id       = archiveRow.form_id as string;
+    const submission_id = (archiveRow.submission_id as string) || rawSub || "";
 
-    // ── LEBANON / WISHMONEY: create payment order ──
-    if (payment_method === "whish" || payment_method === "wishmoney") {
-      const callbackUrl = `${EF_BASE_URL}/webhook-wishmoney?sid=${submission_id}&user_id=${user_id}&email=${encodeURIComponent(email || "")}&plan=${plan}&amount=${amount}`;
+    // ════════════════════════════════════════════════════════════════════════════
+    // WISHMONEY PATH — Lebanon
+    // Completely stateless: call WishMoney API, return collectUrl.
+    // Connection tokens passed in callback URL so webhook can mint generation_id
+    // after confirmed payment. No database row is created here.
+    // ════════════════════════════════════════════════════════════════════════════
+    if (normalizedMethod === "whish" || normalizedMethod === "wishmoney") {
+      const wmExternalId = Date.now();
+
+      // Callback URL carries the reference context only — no generation_id yet.
+      // webhook-wishmoney uses these params to:
+      //   1. verify idempotency via wishmoney_order_id (= tid)
+      //   2. extract cv_archive snapshot via fid
+      //   3. INSERT into order_generations and mint generation_id
+      //   4. redirect browser to /success?gid=<minted_gid>
+      const baseCallback =
+        `${EF_BASE_URL}/webhook-wishmoney` +
+        `?sid=${encodeURIComponent(submission_id)}` +
+        `&fid=${encodeURIComponent(form_id)}` +
+        `&tid=${wmExternalId}` +
+        `&plan=${encodeURIComponent(plan)}` +
+        `&amount=${encodeURIComponent(String(amount ?? ""))}`;
 
       const wmRes = await fetch(WISHMONEY_API, {
         method: "POST",
         headers: {
-          "channel": WISHMONEY_CHANNEL,
-          "secret": WISHMONEY_SECRET,
-          "websiteUrl": "resumation.co",
+          "channel":      WISHMONEY_CHANNEL,
+          "secret":       WISHMONEY_SECRET,
+          "websiteUrl":   "resumation.co",
           "Content-Type": "application/json",
+          "User-Agent":   "Whish/1.0 (https://whish.money; support@whish.money)",
         },
         body: JSON.stringify({
           amount,
-          currency: currency || "USD",
-          externalId: submission_id,
-          successCallbackUrl: callbackUrl,
-          successRedirectUrl: "https://resumation.co/package-access",
-          failedRedirectUrl: "https://resumation.co/plans",
+          currency:   currency || "USD",
+          invoice:    `Resumation ${plan} plan`,
+          externalId: wmExternalId,
+          // Server-to-server callback: fires on WishMoney confirmation
+          successCallbackUrl: `${baseCallback}&status=success`,
+          failureCallbackUrl: `${baseCallback}&status=failed`,
+          // Browser redirect: also points to the webhook — it mints gid then redirects
+          // the user's browser to /success?gid=<gid>&tid=<tid>
+          successRedirectUrl: `${baseCallback}&status=success`,
+          failureRedirectUrl: "https://resumation.co/plans",
         }),
       });
 
-      const wmData = await wmRes.json().catch(() => ({}));
+      const wmData    = await wmRes.json().catch(() => ({}));
       const collectUrl: string =
-        wmData?.collectUrl || wmData?.data?.collectUrl ||
-        wmData?.url || wmData?.paymentUrl || "";
+        wmData?.data?.collectUrl ||
+        wmData?.collectUrl       ||
+        wmData?.url              ||
+        wmData?.paymentUrl       || "";
 
       if (collectUrl) {
-        // Save wishmoney_order_id if available
-        const orderId = wmData?.id || wmData?.data?.id || wmData?.orderId || "";
-        if (orderId) {
-          await db.from("cv_archive")
-            .update({ wishmoney_order_id: String(orderId) })
-            .eq("submission_id", submission_id);
-        }
-        return new Response(JSON.stringify({ collectUrl }), {
-          headers: { ...cors, "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ url: collectUrl }),
+          { headers: { ...cors, "Content-Type": "application/json" } }
+        );
       }
 
       console.error("WishMoney response:", JSON.stringify(wmData));
-      return new Response(JSON.stringify({ error: "Failed to create WishMoney order", details: wmData }), {
-        status: 502, headers: { ...cors, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ error: "Failed to create WishMoney order", details: wmData }),
+        { status: 502, headers: { ...cors, "Content-Type": "application/json" } }
+      );
     }
 
-    return new Response(JSON.stringify({ error: "Unknown payment_method" }), {
-      status: 400, headers: { ...cors, "Content-Type": "application/json" },
-    });
+    // ════════════════════════════════════════════════════════════════════════════
+    // PAYMOB PATH — Egypt
+    // Stateless: verify form exists, return the standalone link + reference context.
+    // confirm-payment is the INSERT engine for Paymob (receives generation data
+    // after the user's browser returns from the gateway).
+    // ════════════════════════════════════════════════════════════════════════════
+    if (normalizedMethod === "paymob") {
+      const paymobLink = PAYMOB_LINKS[plan] ?? "";
+      if (!paymobLink) {
+        return new Response(
+          JSON.stringify({ error: `No Paymob link configured for plan: ${plan}` }),
+          { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          url:          paymobLink,
+          form_id,
+          submission_id,
+          plan,
+        }),
+        { headers: { ...cors, "Content-Type": "application/json" } }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({ error: "Unhandled payment_method" }),
+      { status: 400, headers: { ...cors, "Content-Type": "application/json" } }
+    );
 
   } catch (err) {
     console.error("create-cv-order error:", err);
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500, headers: { ...cors, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: String(err) }),
+      { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
+    );
   }
 });

@@ -39,7 +39,7 @@ export default function NotificationListener() {
                }));
 
                toast.success("Construction Complete 🚀", {
-                 id: `cv-ready-${newDoc.id || 'unique'}`,
+                 id: `cv-ready-${newDoc.form_id || 'unique'}`,
                  description: "Your professional document has been generated and is ready for deployment.",
                  duration: 10000,
                  style: {
