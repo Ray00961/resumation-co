@@ -5,8 +5,10 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_URL    = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_KEY     = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const PAYMOB_API_KEY  = Deno.env.get("PAYMOB_API_KEY") ?? "";
+const PAYMOB_API_BASE = "https://accept.paymobsolutions.com/api";
 
 // Coin rewards per plan — must stay in sync with webhook-wishmoney
 const PLAN_COINS: Record<string, number> = {
@@ -194,10 +196,64 @@ async function sendReceiptEmail(params: {
   }
 }
 
+// ── Paymob transaction verification ──────────────────────────────────────────
+// Confirms a paymob_order_id is a real, paid Paymob order before creating any
+// order_generations row. Fails-open when PAYMOB_API_KEY is not configured (for
+// backward compat during rollout) and on transient network errors (to avoid
+// blocking legitimate payments during Paymob API outages).
+// Set PAYMOB_API_KEY in Supabase Secrets to enable full verification.
+async function verifyPaymobTransaction(
+  orderId: string,
+): Promise<{ verified: boolean; reason: string }> {
+  if (!PAYMOB_API_KEY) {
+    console.warn(
+      "confirm-payment: PAYMOB_API_KEY not set — skipping server-side verification.",
+      { orderId },
+    );
+    return { verified: true, reason: "skipped_no_key" };
+  }
+  try {
+    // Step 1 — obtain a short-lived auth token
+    const authRes = await fetch(`${PAYMOB_API_BASE}/auth/tokens`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ api_key: PAYMOB_API_KEY }),
+    });
+    if (!authRes.ok) {
+      console.error("confirm-payment: Paymob auth token request failed", authRes.status);
+      return { verified: true, reason: "auth_error_failopen" };
+    }
+    const { token } = await authRes.json();
+
+    // Step 2 — query the order; paid_amount_cents > 0 = confirmed payment
+    const orderRes = await fetch(`${PAYMOB_API_BASE}/ecommerce/orders/${orderId}`, {
+      headers: { "Authorization": `Bearer ${token}` },
+    });
+    if (!orderRes.ok) {
+      console.error("confirm-payment: Paymob order lookup failed", orderId, orderRes.status);
+      return { verified: false, reason: "order_not_found" };
+    }
+    const order = await orderRes.json();
+    if (order?.paid_amount_cents > 0) {
+      return { verified: true, reason: "paid" };
+    }
+    console.warn("confirm-payment: Paymob order not paid", {
+      orderId,
+      paid_amount_cents: order?.paid_amount_cents,
+    });
+    return { verified: false, reason: "not_paid" };
+  } catch (err) {
+    // Network / parse error — fail-open to avoid blocking real payments
+    console.error("confirm-payment: Paymob verification threw", err);
+    return { verified: true, reason: "exception_failopen" };
+  }
+}
+
 // ── Shared coin-awarding helper ──────────────────────────────────────────────
-// Tries the add_coins RPC first; falls back to a direct users-table update plus
-// a coin_transactions ledger entry. Failure is logged but does NOT abort the
-// caller — coins are non-critical compared to the generation row itself.
+// Calls the award_coins RPC (service_role only); falls back to a direct
+// users-table update + coin_transactions ledger entry.
+// Failure is logged but does NOT abort the caller — coins are non-critical
+// compared to the generation row itself.
 async function awardCoins(
   db:            ReturnType<typeof createClient>,
   user_id:       string,
@@ -207,16 +263,16 @@ async function awardCoins(
   const coinsToAdd = PLAN_COINS[plan] ?? 0;
   if (coinsToAdd <= 0) return;
 
-  const { error: rpcErr } = await db.rpc("add_coins", {
-    p_user_id:   user_id,
-    p_amount:    coinsToAdd,
-    p_reason:    `plan_purchase_${plan}`,
-    p_reference: generation_id,
+  // award_coins(p_user_id, p_amount, p_reason) — service_role only, no p_reference
+  const { error: rpcErr } = await db.rpc("award_coins", {
+    p_user_id: user_id,
+    p_amount:  coinsToAdd,
+    p_reason:  `plan_purchase_${plan}`,
   });
 
   if (!rpcErr) return; // RPC succeeded — done
 
-  console.warn("confirm-payment: add_coins RPC unavailable, using direct fallback", rpcErr);
+  console.warn("confirm-payment: award_coins RPC failed, using direct fallback", rpcErr);
 
   const { data: usr } = await db
     .from("users")
@@ -388,10 +444,30 @@ Deno.serve(async (req) => {
     // the sole INSERT engine for this path, exactly mirroring webhook-wishmoney's
     // role for WishMoney.
     //
+    // Paymob transaction is verified against Paymob's API before any row is
+    // created — prevents forged paymob_order_id values from creating free
+    // generations. Requires PAYMOB_API_KEY to be set in Supabase Secrets.
+    //
     // form_id resolution order:
     //   1. Caller-supplied form_id in the request body
     //   2. Latest cv_archive entry for the authenticated user (automatic fallback)
     // ══════════════════════════════════════════════════════════════════════════
+
+    // ── Verify the Paymob transaction is real before touching the DB ──────────
+    if (paymob_order_id) {
+      const { verified, reason } = await verifyPaymobTransaction(paymob_order_id);
+      if (!verified) {
+        console.error("confirm-payment: Stage 3 — Paymob verification rejected INSERT", {
+          paymob_order_id, reason, user_id,
+        });
+        return new Response(
+          JSON.stringify({ error: "Payment verification failed. Please contact support if you were charged." }),
+          { status: 402, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+      console.log("confirm-payment: Paymob transaction verified", { paymob_order_id, reason });
+    }
+
     let resolvedFormId = form_id;
 
     if (!resolvedFormId) {

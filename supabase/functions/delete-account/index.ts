@@ -43,10 +43,23 @@ Deno.serve(async (req) => {
       .select("rewritten_cv_file_path")
       .eq("user_id", uid);
 
+    // Paid-plan rows store actual storage paths in cv_file_path / cl_file_path
+    // (pattern: "{uid}/{generation_id}_cv_{lang}.html").
+    // Free-plan rows store raw HTML in cv_file_path (starts with "<") — filter
+    // those out so storage.remove() doesn't receive HTML blobs as file names.
+    const { data: generationRows } = await db
+      .from("order_generations")
+      .select("cv_file_path, cl_file_path")
+      .eq("user_id", uid);
+
     // ── 3. Delete in FK-safe order ──
 
     // ai_hunter_logs references cv_archive.form_id → must go first
     await db.from("ai_hunter_logs").delete().eq("user_id", uid);
+
+    // order_generations references cv_archive.form_id (and users.id) →
+    // must be deleted before cv_archive to avoid FK constraint violations
+    await db.from("order_generations").delete().eq("user_id", uid);
 
     // cv_archive
     await db.from("cv_archive").delete().eq("user_id", uid);
@@ -70,6 +83,12 @@ Deno.serve(async (req) => {
     const filePaths: string[] = [];
     (cvRows ?? []).forEach((r: any) => { if (r.cv_file_path) filePaths.push(r.cv_file_path); });
     (analysisRows ?? []).forEach((r: any) => { if (r.rewritten_cv_file_path) filePaths.push(r.rewritten_cv_file_path); });
+    // Include paid-plan generation files; skip free-plan rows whose cv_file_path
+    // is raw HTML (starts with "<") rather than a storage object path.
+    (generationRows ?? []).forEach((r: any) => {
+      if (r.cv_file_path && !r.cv_file_path.startsWith("<")) filePaths.push(r.cv_file_path);
+      if (r.cl_file_path) filePaths.push(r.cl_file_path);
+    });
 
     if (filePaths.length > 0) {
       const { error: storageErr } = await db.storage.from("cv-documents").remove(filePaths);

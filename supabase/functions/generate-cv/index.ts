@@ -1,8 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const OPENAI_KEY   = Deno.env.get("OPENAI_API_KEY")!;
+const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_KEY       = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const OPENAI_KEY        = Deno.env.get("OPENAI_API_KEY")!;
 
 // ── OpenAI: FREE PLAN — generate HTML career teaser ─────────────────────────
 async function generateFreeHtml(cvData: any): Promise<string> {
@@ -998,7 +999,7 @@ Deno.serve(async (req) => {
   };
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
-  // ── Auth gate: require a non-empty Bearer token ───────────────────────────
+  // ── Auth: full JWT verification — callerUid always from server-side token ──
   const authHeader = req.headers.get("Authorization") ?? "";
   const token      = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
 
@@ -1007,6 +1008,15 @@ Deno.serve(async (req) => {
       status: 401, headers: { ...cors, "Content-Type": "application/json" },
     });
   }
+
+  const authDb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const { data: { user: callerUser }, error: authErr } = await authDb.auth.getUser(token);
+  if (authErr || !callerUser) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  const callerUid = callerUser.id;
 
   const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -1042,6 +1052,19 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: "order not found" }),
         { status: 404, headers: { ...cors, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Ownership check — caller must own this generation_id ──────────────────
+    // Prevents an authenticated user from triggering generation against another
+    // user's paid order by guessing or sharing generation_id UUIDs.
+    if (record.user_id !== callerUid) {
+      console.warn("[generate-cv] ownership check failed", {
+        generation_id, callerUid, owner: record.user_id,
+      });
+      return new Response(
+        JSON.stringify({ error: "Access denied" }),
+        { status: 403, headers: { ...cors, "Content-Type": "application/json" } }
       );
     }
 

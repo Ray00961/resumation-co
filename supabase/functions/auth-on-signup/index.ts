@@ -43,12 +43,18 @@ Deno.serve(async (req) => {
       promoCode = generatePromoCode();
     }
 
+    // is_founder: the DB trigger (trg_generate_promo_code) is only WHEN promo_code IS NULL
+    // but auth-on-signup pre-generates a code and passes it here, so the trigger fires
+    // for rows WITH promo_code IS NULL only — our row has a code, trigger is skipped.
+    // Must compute is_founder explicitly using the same date threshold as the trigger.
+    const is_founder = new Date() < new Date("2026-07-01T00:00:00Z");
+
     await db.from("users").upsert({
       id: userId,
       email,
       promo_code: promoCode,
       search_coins: 0,
-      is_founder: false,
+      is_founder,
       agreed_to_terms: false,
     }, { onConflict: "id", ignoreDuplicates: true });
 

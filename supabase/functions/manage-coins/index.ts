@@ -39,48 +39,55 @@ Deno.serve(async (req) => {
     // Always use the authenticated user's ID — never trust user_id from the body
     const user_id = user.id;
 
-    const db = createClient(SUPABASE_URL, SERVICE_KEY);
-
-    // Fetch current balance
-    const { data: userData, error: fetchErr } = await db
-      .from("users")
-      .select("search_coins")
-      .eq("id", user_id)
-      .single();
-
-    if (fetchErr || !userData) {
-      return new Response(JSON.stringify({ error: "User not found" }), {
-        status: 404, headers: { ...cors, "Content-Type": "application/json" },
-      });
-    }
-
-    const current: number = userData.search_coins ?? 0;
-
-    // ── CHECK ──
+    // ── CHECK ── read current balance via service role (safe, no race condition)
     if (operation === "check" || !operation) {
-      return new Response(JSON.stringify({ balance: current }), {
-        headers: { ...cors, "Content-Type": "application/json" },
-      });
-    }
-
-    // ── DEDUCT ── (only allowed operation for authenticated users)
-    if (operation === "deduct") {
-      if (current < (amount || 0)) {
-        return new Response(JSON.stringify({ error: "Insufficient coins", balance: current }), {
-          status: 402, headers: { ...cors, "Content-Type": "application/json" },
+      const db = createClient(SUPABASE_URL, SERVICE_KEY);
+      const { data: userData, error: fetchErr } = await db
+        .from("users")
+        .select("search_coins")
+        .eq("id", user_id)
+        .single();
+      if (fetchErr || !userData) {
+        return new Response(JSON.stringify({ error: "User not found" }), {
+          status: 404, headers: { ...cors, "Content-Type": "application/json" },
         });
       }
-      const newBalance = current - (amount || 0);
-      await db.from("users").update({ search_coins: newBalance }).eq("id", user_id);
-      await db.from("coin_transactions").insert({
-        user_id,
-        amount:    -(amount || 0),
-        reason:    reason || "manual_deduct",
-        reference: reference || null,
-      });
-      return new Response(JSON.stringify({ success: true, balance: newBalance }), {
+      return new Response(JSON.stringify({ balance: userData.search_coins ?? 0 }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
+    }
+
+    // ── DEDUCT ── atomic via spend_coins RPC — eliminates TOCTOU race condition.
+    // spend_coins uses FOR UPDATE + auth.uid() internally so the SELECT and UPDATE
+    // run atomically inside a single DB transaction — no double-spend possible.
+    // Must call via a user-scoped client (not service role) so PostgREST sets
+    // auth.uid() correctly; service role bypasses RLS and leaves auth.uid() NULL.
+    if (operation === "deduct") {
+      const userDb = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const { data: result, error: spendErr } = await userDb.rpc("spend_coins", {
+        p_amount:    amount    || 0,
+        p_reason:    reason    || "manual_deduct",
+        p_reference: reference || null,
+      });
+      if (spendErr) {
+        console.error("manage-coins: spend_coins RPC error:", spendErr);
+        return new Response(
+          JSON.stringify({ error: "Coin operation failed", detail: spendErr.message }),
+          { status: 500, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+      if (!result?.success) {
+        return new Response(
+          JSON.stringify({ error: result?.error ?? "Insufficient coins", balance: result?.balance ?? 0 }),
+          { status: 402, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ success: true, balance: result.balance }),
+        { headers: { ...cors, "Content-Type": "application/json" } }
+      );
     }
 
     // ── ADD is blocked ── (internal use only via service role)
