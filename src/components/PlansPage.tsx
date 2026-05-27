@@ -117,11 +117,11 @@ export default function PlansPage() {
             .select("form_id, submission_id, user_id")
             .eq("user_id", uid);
 
-          const { data: rows } = isUuid
+          const { data: matched } = isUuid
             ? await baseQ.eq("form_id", idFromUrl).maybeSingle()
             : await baseQ.eq("submission_id", idFromUrl).maybeSingle();
 
-          arcRow = rows ?? null;
+          arcRow = matched ?? null;
         }
 
         // Fallback: latest row for this user
@@ -238,6 +238,14 @@ export default function PlansPage() {
         });
         const paymobResult = await paymobRes.json().catch(() => ({}));
 
+        // Only fall back to the static link if the EF failed — a successful EF
+        // response always includes a url with the correct merchant_order_id.
+        if (!paymobRes.ok && !paymobResult?.url) {
+          setPayError(paymobResult?.error || paymobResult?.message || "Payment gateway error — please try again.");
+          setLoading(null);
+          return;
+        }
+
         const linkMap: Record<string, string> = {
           premium:   PREMIUM_LINK_EGY,
           gold:      GOLD_LINK_EGY,
@@ -332,20 +340,27 @@ export default function PlansPage() {
         body: JSON.stringify({
           user_id: userId, email: userEmail || "",
           form_id: formId,
-          payment_id: submissionId || "",
+          submission_id: submissionId || "",
           plan: "free", payment_method: "free",
         }),
         signal: AbortSignal.timeout(10_000),
       });
 
-      await res.json().catch(() => ({}));
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPayError(result?.error || result?.message || "Something went wrong — please try again.");
+        setLoading(null);
+        return;
+      }
+      const safeFid = formId ?? "";
       navigate(
-        `/building?sid=${encodeURIComponent(submissionId || formId)}&fid=${encodeURIComponent(formId)}`
+        `/building?sid=${encodeURIComponent(submissionId || safeFid)}&fid=${encodeURIComponent(safeFid)}`
       );
     } catch (err: unknown) {
       const e = err as { name?: string };
+      const safeFid = formId ?? "";
       if (e?.name === "TimeoutError" || e?.name === "AbortError") {
-        navigate(`/building?sid=${encodeURIComponent(submissionId || formId)}&fid=${encodeURIComponent(formId)}`);
+        navigate(`/building?sid=${encodeURIComponent(submissionId || safeFid)}&fid=${encodeURIComponent(safeFid)}`);
       } else {
         setPayError("Network error — please try again.");
       }
@@ -794,13 +809,13 @@ export default function PlansPage() {
           {[
             { icon: ShieldCheck, text: t.trustSecure },
             { icon: Zap,         text: t.trustInstant },
-            { icon: Globe,       text: () => t.trustOnce },
+            { icon: Globe,       text: t.trustOnce },
           ].map(({ icon: Icon, text }, i) => (
             <div key={i} className="flex items-center gap-2">
               {i > 0 && <div className="w-px h-3 bg-[rgba(86,108,158,0.2)] mr-4" />}
               <Icon className="w-3 h-3 text-[#e1ebed]/50" />
               <span className="text-[10px] font-black uppercase tracking-widest text-[#e1ebed]/40">
-                {typeof text === 'function' ? t.trustOnce : text}
+                {text}
               </span>
             </div>
           ))}
