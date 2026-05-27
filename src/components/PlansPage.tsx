@@ -17,7 +17,8 @@ export default function PlansPage() {
   const [userName,        setUserName]        = useState<string | null>(null);
   const [submissionId,    setSubmissionId]    = useState<string | null>(null);
   const [formId,          setFormId]          = useState<string | null>(null);
-  const [oldSubmissionId, setOldSubmissionId] = useState<string | null>(null);
+  // oldSubmissionId retained for URL param read-only; not consumed by current UI
+  // const [oldSubmissionId, setOldSubmissionId] = useState<string | null>(null);
   const [loading,         setLoading]         = useState<PlanType | null>(null);
   const [payError,        setPayError]        = useState<string | null>(null);
   const [isCheckingAuth,  setIsCheckingAuth]  = useState(true);
@@ -50,8 +51,8 @@ export default function PlansPage() {
   useEffect(() => {
     const params        = new URLSearchParams(window.location.search);
     const idFromUrl     = params.get("id");
-    const oldSubFromUrl = params.get("old_sub");
-    if (oldSubFromUrl) setOldSubmissionId(oldSubFromUrl);
+    const oldSubFromUrl = params.get("old_sub");  // read for future use; not consumed yet
+    void oldSubFromUrl;
 
     // Hard bailout — never leave user stuck on spinner
     const bailout = setTimeout(() => setIsCheckingAuth(false), 8000);
@@ -69,7 +70,7 @@ export default function PlansPage() {
             const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
             uid   = cached?.user?.id   || null;
             email = cached?.user?.email || cached?.user?.user_metadata?.email || null;
-          } catch {}
+          } catch { /* ignore parse errors — falls through to getSession() */ }
         }
         // Fallback to getSession() if localStorage didn't have it
         if (!uid) {
@@ -185,7 +186,7 @@ export default function PlansPage() {
             const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
             accessToken = cached?.access_token || cached?.session?.access_token;
           }
-        } catch {}
+        } catch { /* localStorage may be unavailable in some browsers — ignore */ }
       }
 
       if (!accessToken) {
@@ -282,8 +283,9 @@ export default function PlansPage() {
           setLoading(null);
         }
       }
-    } catch (err: any) {
-      if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+    } catch (err: unknown) {
+      const e = err as { name?: string };
+      if (e?.name === "TimeoutError" || e?.name === "AbortError") {
         setPayError("Payment gateway timed out — please try again.");
       } else {
         console.warn("Payment error:", err);
@@ -315,7 +317,7 @@ export default function PlansPage() {
             const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
             accessToken = cached?.access_token || cached?.session?.access_token;
           }
-        } catch {}
+        } catch { /* localStorage may be unavailable in some browsers — ignore */ }
       }
 
       if (!accessToken) {
@@ -340,8 +342,9 @@ export default function PlansPage() {
       navigate(
         `/building?sid=${encodeURIComponent(submissionId || formId)}&fid=${encodeURIComponent(formId)}`
       );
-    } catch (err: any) {
-      if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+    } catch (err: unknown) {
+      const e = err as { name?: string };
+      if (e?.name === "TimeoutError" || e?.name === "AbortError") {
         navigate(`/building?sid=${encodeURIComponent(submissionId || formId)}&fid=${encodeURIComponent(formId)}`);
       } else {
         setPayError("Network error — please try again.");

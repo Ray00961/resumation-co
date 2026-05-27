@@ -33,7 +33,18 @@ export default function PricingDescription() {
   const [userRegion, setUserRegion] = useState<string>(Cookies.get("user_region") || "LB");
   const isEgypt = userRegion === "EG";
 
-  useEffect(() => { detectRegion().then(r => setUserRegion(r)); }, []);
+  useEffect(() => {
+    detectRegion()
+      .then(r => {
+        const sanitized = (r === "BA" || r === "Beirut" || !r) ? "LB" : r;
+        setUserRegion(sanitized);
+        Cookies.set("user_region", sanitized, { expires: 30 });
+      })
+      .catch(() => {
+        setUserRegion("LB");
+        Cookies.set("user_region", "LB", { expires: 30 });
+      });
+  }, []);
 
   const cur = isEgypt ? "EGP" : "USD";
   const sym = isEgypt ? "" : "$";
