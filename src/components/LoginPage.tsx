@@ -172,7 +172,8 @@ const LoginPage = () => {
     }, 15000);
 
     try {
-      const EF_USER_SYNC = import.meta.env.VITE_EF_USER_SYNC;
+      const EF_USER_SYNC = (import.meta.env.VITE_EF_USER_SYNC as string) ||
+        "https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/user-sync";
       if (EF_USER_SYNC) {
         const pending = localStorage.getItem("pending_user_data");
         const parsed  = pending ? JSON.parse(pending) : {};

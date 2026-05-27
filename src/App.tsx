@@ -27,6 +27,8 @@ import Terms from "./components/Terms";
 import Privacy from "./components/Privacy";
 import AboutPage from "./components/AboutPage";
 import ProtectedRoute from "./components/ProtectedRoute";
+import BuildingPage from "./components/BuildingPage";
+import GoodbyePage from "./components/GoodbyePage";
 
 import FreeLinks from "./FreeLinks";
 import PremiumLinks from "./PremiumLinks";
@@ -85,6 +87,7 @@ export default function App() {
               <Route path="/privacy"   element={<Privacy />} />
               <Route path="/about"     element={<AboutPage />} />
               <Route path="/contact"   element={<ContactPage />} />
+              <Route path="/goodbye"   element={<GoodbyePage />} />
               <Route path="/u/:username" element={<PublicProfile />} />
 
               {/* ══ PROTECTED — Sidebar ══ */}
@@ -113,6 +116,7 @@ export default function App() {
               <Route path="/builder"        element={<ProtectedRoute><ResumeForm /></ProtectedRoute>} />
               <Route path="/resume-builder" element={<ProtectedRoute><ResumeForm /></ProtectedRoute>} />
               <Route path="/plans"          element={<ProtectedRoute><PlansPage /></ProtectedRoute>} />
+              <Route path="/building"      element={<ProtectedRoute><BuildingPage /></ProtectedRoute>} />
               <Route path="/package-access" element={<ProtectedRoute><PackageAccess /></ProtectedRoute>} />
               <Route path="/success"        element={<ProtectedRoute><SuccessPage /></ProtectedRoute>} />
               <Route path="/free-links"     element={<ProtectedRoute><FreeLinks /></ProtectedRoute>} />
