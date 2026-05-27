@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { Loader2, Globe, Zap, ShieldCheck, Crown, Activity, ArrowRight, Check, Sparkles, Search, PenLine, BrainCircuit, Gift, CheckCircle2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabase";
@@ -98,7 +98,6 @@ export default function PlansPage() {
 
         if (idFromUrl) {
           // Detect whether idFromUrl is a UUID (form_id) or a short alphanumeric (submission_id)
-          // Mixing them in .or() causes a Postgres UUID type-cast error
           const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idFromUrl);
 
           const baseQ = supabase
@@ -128,7 +127,6 @@ export default function PlansPage() {
         if (!arcRow) { navigate("/build"); return; }
 
         setFormId(arcRow.form_id);
-        // Keep submission_id and form_id strictly decoupled — never substitute one for the other
         setSubmissionId(arcRow.submission_id || "");
         setHasReferral(!!(userData?.referred_by));
 
@@ -151,14 +149,14 @@ export default function PlansPage() {
     try {
       if (!userId) {
         setPayError("Session error — please refresh the page.");
+        setLoading(null);
         return;
       }
 
-      const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
-      if (!EF_URL) {
-        setPayError("Payment endpoint not configured — please contact support.");
-        return;
-      }
+      // Hardcoded fallback guarantees the endpoint is always resolvable even if
+      // the VITE_ env var is absent from the deployment environment.
+      const EF_URL = (import.meta.env.VITE_EF_CREATE_CV_ORDER as string) ||
+        "https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/create-cv-order";
 
       // Get fresh JWT — try Supabase SDK first, fall back to localStorage cache
       let accessToken: string | undefined;
@@ -181,24 +179,30 @@ export default function PlansPage() {
 
       if (!accessToken) {
         setPayError("Session expired — please reload the page.");
+        setLoading(null);
         return;
       }
 
-      // Keep submission_id and form_id strictly decoupled — never substitute one for the other
-      const sid = submissionId || "";
+      // ── Runtime Fallback Sanitization to prevent Javascript crash ──
+      const safeUserId   = userId || "";
+      const safeEmail    = userEmail || "";
+      const safeName     = userName || "User";
+      const safeFormId   = formId || "";
+      const safeSid      = submissionId || "";
+      const safeRegion   = userRegion || "LB";
+
       const amt = finalPrice(plan);
       const cur = isEgypt ? "EGP" : "USD";
 
-      // Core payload — create-cv-order reads form_id, submission_id, payment_method,
-      // plan, email, amount, currency. Extra fields are ignored by the edge function.
+      // Core payload — values guaranteed to be non-null strings
       const body = {
-        user_id:       userId,
-        email:         userEmail,
-        full_name:     userName,
-        form_id:       formId,
-        submission_id: sid,
+        user_id:       safeUserId,
+        email:         safeEmail,
+        full_name:     safeName,
+        form_id:       safeFormId,
+        submission_id: safeSid,
         plan,
-        region:        userRegion,
+        region:        safeRegion,
         amount:        amt,
         currency:      cur,
         has_referral:  hasReferral,
@@ -211,18 +215,14 @@ export default function PlansPage() {
       };
 
       if (isEgypt) {
-        // Paymob path — stateless: create-cv-order validates the form and returns
-        // the standalone payment link + reference context. No generation_id is
-        // created at checkout. confirm-payment is the INSERT engine for Paymob.
         const paymobRes = await fetch(EF_URL, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ ...body, payment_method: "paymob" }),
-          signal: AbortSignal.timeout(10_000),
+          signal: AbortSignal.timeout(15_000),
         });
         const paymobResult = await paymobRes.json().catch(() => ({}));
 
-        // Fallback map for standalone links (edge function is the primary source)
         const linkMap: Record<string, string> = {
           premium:   PREMIUM_LINK_EGY,
           gold:      GOLD_LINK_EGY,
@@ -231,28 +231,24 @@ export default function PlansPage() {
         const baseLink = paymobResult?.url || linkMap[plan];
         if (!baseLink) {
           setPayError("Payment link not available — please try again.");
+          setLoading(null);
           return;
         }
 
-        // Encode form_id in merchant_order_id so confirm-payment can locate the row
-        const resolvedFormId = paymobResult?.form_id || formId || "";
-        const cid = `${userId}---${resolvedFormId}`;
+        const resolvedFormId = paymobResult?.form_id || safeFormId;
+        const cid = `${safeUserId}---${resolvedFormId}`;
 
-        // Persist the plan tier to sessionStorage so SuccessPage can pass it to
-        // confirm-payment on the cold-redirect path (Paymob doesn't echo plan back).
         sessionStorage.setItem("rsm_plan", plan);
 
         window.location.href = baseLink
-          + `&billing_data[first_name]=${encodeURIComponent(userName || "User")}`
+          + `&billing_data[first_name]=${encodeURIComponent(safeName)}`
           + `&billing_data[last_name]=Customer`
-          + `&billing_data[email]=${encodeURIComponent(userEmail || "")}`
+          + `&billing_data[email]=${encodeURIComponent(safeEmail)}`
           + `&billing_data[phone_number]=01111111111`
           + `&billing_data[street]=${encodeURIComponent(cid)}`
           + `&merchant_order_id=${encodeURIComponent(cid)}`;
 
       } else {
-        // WishMoney path — stateless: create-cv-order calls WishMoney and returns
-        // the collectUrl. The webhook mints generation_id after payment confirmation.
         const res = await fetch(EF_URL, {
           method: "POST",
           headers: authHeaders,
@@ -269,6 +265,7 @@ export default function PlansPage() {
           const errMsg = result?.error || result?.message || JSON.stringify(result);
           console.error("WishMoney no url:", result);
           setPayError(`Payment gateway error: ${errMsg}`);
+          setLoading(null);
         }
       }
     } catch (err: any) {
@@ -278,7 +275,6 @@ export default function PlansPage() {
         console.warn("Payment error:", err);
         setPayError("Network error — please try again.");
       }
-    } finally {
       setLoading(null);
     }
   };
@@ -290,9 +286,9 @@ export default function PlansPage() {
     setPayError(null);
 
     try {
-      const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
+      const EF_URL = (import.meta.env.VITE_EF_CREATE_CV_ORDER as string) ||
+        "https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/create-cv-order";
 
-      // Get fresh JWT
       let accessToken: string | undefined;
       try {
         const { data: { session: s } } = await supabase.auth.getSession();
@@ -310,6 +306,7 @@ export default function PlansPage() {
 
       if (!accessToken) {
         setPayError("Session expired — please reload the page.");
+        setLoading(null);
         return;
       }
 
@@ -317,7 +314,7 @@ export default function PlansPage() {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
         body: JSON.stringify({
-          user_id: userId, email: userEmail,
+          user_id: userId, email: userEmail || "",
           form_id: formId,
           payment_id: submissionId || "",
           plan: "free", payment_method: "free",
@@ -325,14 +322,12 @@ export default function PlansPage() {
         signal: AbortSignal.timeout(10_000),
       });
 
-      const result = await res.json().catch(() => ({}));
-      // Navigate to building — fid still used by BuildingPage to call generate-free-cv
+      await res.json().catch(() => ({}));
       navigate(
         `/building?sid=${encodeURIComponent(submissionId || formId)}&fid=${encodeURIComponent(formId)}`
       );
     } catch (err: any) {
       if (err?.name === "TimeoutError" || err?.name === "AbortError") {
-        // Even on timeout, navigate — order_generations row might be created
         navigate(`/building?sid=${encodeURIComponent(submissionId || formId)}&fid=${encodeURIComponent(formId)}`);
       } else {
         setPayError("Network error — please try again.");
@@ -356,7 +351,7 @@ export default function PlansPage() {
       oneTime: "one-time",
       mostPopular: "Most Popular",
       aiPill: "Coin top-up", aiTitle: "AI Hunter", aiSub: "Coins only · No CV build",
-      premPill: "Most popular", premTitle: "Premium",    premSub: "Complete ATS Resume Build",
+      premPill: "Most popular", premTitle: "Premium",     premSub: "Complete ATS Resume Build",
       goldPill: "Full suite",   goldTitle: "Gold Package", goldSub: "Complete Application Suite",
       coinsLabel: "Coins",
       coinsDouble: "Coins (2× bonus!)",
@@ -369,7 +364,7 @@ export default function PlansPage() {
       coinTitle: "How Coins Work",
       coinSub: "Every AI-powered action costs Coins. Buy once, use whenever you need.",
       coinRows: [
-        { icon: "search", cost: "1 Coin",   action: "AI Job Search",            desc: "Returns 2 matching jobs + a compatibility score" },
+        { icon: "search", cost: "1 Coin",   action: "AI Job Search",             desc: "Returns 2 matching jobs + a compatibility score" },
         { icon: "pen",    cost: "3 Coins",  action: "Rewrite CV & Cover Letter", desc: "Full AI rewrite aligned to your target role" },
         { icon: "brain",  cost: "6 Coins",  action: "JD Analysis + Full Rewrite", desc: "Paste any external job description — AI analyzes it then rewrites your CV & Cover Letter to match perfectly" },
       ],
@@ -386,7 +381,7 @@ export default function PlansPage() {
       oneTime: "دفعة واحدة",
       mostPopular: "الأكثر شعبية",
       aiPill: "شحن رصيد", aiTitle: "AI Hunter", aiSub: "كوينز فقط · بدون بناء CV",
-      premPill: "الأكثر طلباً", premTitle: "بريميوم",    premSub: "بناء سيرة ذاتية متكاملة",
+      premPill: "الأكثر طلباً", premTitle: "بريميوم",     premSub: "بناء سيرة ذاتية متكاملة",
       goldPill: "الحزمة الكاملة", goldTitle: "باقة الذهب", goldSub: "مجموعة تقديم متكاملة",
       coinsLabel: "كوين",
       coinsDouble: "كوين (مضاعف ×2!)",
@@ -490,7 +485,7 @@ export default function PlansPage() {
         <div className="inline-flex items-center gap-2 mt-3 px-3 py-1.5 rounded-full bg-[rgba(86,108,158,0.08)] border border-[rgba(86,108,158,0.18)]">
           <Activity className="w-3 h-3 text-[#e1ebed]" />
           <span className="text-[11px] text-[#e1ebed]">
-            {t.loggedAs} <span className="text-[#E0C58F] font-semibold">{userEmail}</span>
+            {t.loggedAs} <span className="text-[#E0C58F] font-semibold">{userEmail || "..."}</span>
           </span>
         </div>
 
@@ -782,12 +777,14 @@ export default function PlansPage() {
           {[
             { icon: ShieldCheck, text: t.trustSecure },
             { icon: Zap,         text: t.trustInstant },
-            { icon: Globe,       text: t.trustOnce },
+            { icon: Globe,       text: () => t.trustOnce },
           ].map(({ icon: Icon, text }, i) => (
-            <div key={text} className="flex items-center gap-2">
+            <div key={i} className="flex items-center gap-2">
               {i > 0 && <div className="w-px h-3 bg-[rgba(86,108,158,0.2)] mr-4" />}
               <Icon className="w-3 h-3 text-[#e1ebed]/50" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-[#e1ebed]/40">{text}</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#e1ebed]/40">
+                {typeof text === 'function' ? t.trustOnce : text}
+              </span>
             </div>
           ))}
         </div>

@@ -519,20 +519,51 @@ export default function CareerAnalysis() {
       const uniqueOrderId = `ANALYSIS_PLAN_${currentRecordId}_${user.id}_${Date.now()}`;
       window.location.href = `${ANALYSIS_PLAN_LINK}${customParams}&merchant_order_id=${uniqueOrderId}`;
     } else {
-      const PRE_PAYMENT_WEBHOOK = import.meta.env.VITE_MAKE_PRE_PAYMENT;
-      if (!PRE_PAYMENT_WEBHOOK) return;
+      // ── WishMoney path (Lebanon) — routed through create-cv-order Edge Function ──
+      // Make.com (VITE_MAKE_PRE_PAYMENT) was decommissioned 2026-05-27.
+      // create-cv-order requires a Supabase JWT Bearer token — no legacy X-Resumation-Secret.
+      const EF_URL = (import.meta.env.VITE_EF_CREATE_CV_ORDER as string) ||
+        "https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/create-cv-order";
+
+      let accessToken: string | undefined;
       try {
-        const response = await fetch(PRE_PAYMENT_WEBHOOK, {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token;
+      } catch { /* fall through */ }
+
+      if (!accessToken) {
+        try {
+          const lsKey = Object.keys(localStorage).find(
+            k => k.startsWith("sb-") && k.endsWith("-auth-token")
+          );
+          if (lsKey) {
+            const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+            accessToken = cached?.access_token || cached?.session?.access_token;
+          }
+        } catch { /* fall through */ }
+      }
+
+      if (!accessToken) {
+        console.warn("CareerAnalysis: no access token — cannot initiate WishMoney payment");
+        return;
+      }
+
+      try {
+        const response = await fetch(EF_URL, {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            "X-Resumation-Secret": import.meta.env.VITE_WEBHOOK_SECRET as string,
+            "Content-Type":  "application/json",
+            "Authorization": `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
-            user_id: user.id, email: user.email,
-            payment_id: currentRecordId, plan: "analysis",
-            region, amount: 10, currency: "USD", payment_method: "whish",
+            submission_id:  currentRecordId,
+            plan:           "analysis",
+            region,
+            amount:         10,
+            currency:       "USD",
+            payment_method: "whish",
           }),
+          signal: AbortSignal.timeout(10_000),
         });
         const result     = await response.json().catch(() => ({}));
         const collectUrl = result?.collectUrl || result?.data?.collectUrl || result?.url || result?.paymentUrl;
@@ -540,6 +571,8 @@ export default function CareerAnalysis() {
           let finalUrl = collectUrl.trim();
           if (!finalUrl.startsWith("http")) finalUrl = `https://${finalUrl}`;
           window.location.replace(finalUrl);
+        } else {
+          console.warn("CareerAnalysis: no collectUrl from create-cv-order", result);
         }
       } catch (err) { console.warn("Analysis Whish payment error:", err); }
     }

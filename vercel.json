@@ -10,7 +10,7 @@
         { "key": "Permissions-Policy",      "value": "camera=(), microphone=(), geolocation=()" },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' fonts.googleapis.com; font-src 'self' fonts.gstatic.com; worker-src 'self' blob: https://unpkg.com; connect-src 'self' *.supabase.co wss://*.supabase.co hook.*.make.com accept.paymobsolutions.com; img-src 'self' data: https:; frame-ancestors 'none';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' fonts.googleapis.com; font-src 'self' fonts.gstatic.com; worker-src 'self' blob: https://unpkg.com; connect-src 'self' *.supabase.co wss://*.supabase.co accept.paymobsolutions.com; img-src 'self' data: https:; frame-ancestors 'none';"
         }
       ]
     }

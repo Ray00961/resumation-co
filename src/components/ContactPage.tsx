@@ -47,7 +47,7 @@ export default function ContactPage() {
   const handleSubmit = async () => {
     if (!formData.name || !formData.email || !formData.message) return;
     setSending(true);
-    /* TODO: wire Make.com / Supabase Edge Function webhook here */
+    // TODO: wire contact form to a Supabase Edge Function (e.g. send-contact-email via Resend)
     await new Promise(res => setTimeout(res, 1200));
     setSent(true);
     setSending(false);
