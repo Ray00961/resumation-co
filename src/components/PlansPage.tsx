@@ -270,7 +270,7 @@ export default function PlansPage() {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ ...body, payment_method: "whish" }),
-          signal: AbortSignal.timeout(10_000),
+          signal: AbortSignal.timeout(30_000),
         });
         const result = await res.json().catch(() => ({}));
         const url = result?.url || result?.collectUrl || result?.data?.collectUrl || result?.paymentUrl;

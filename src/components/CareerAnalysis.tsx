@@ -563,7 +563,7 @@ export default function CareerAnalysis() {
             currency:       "USD",
             payment_method: "whish",
           }),
-          signal: AbortSignal.timeout(10_000),
+          signal: AbortSignal.timeout(30_000),
         });
         const result     = await response.json().catch(() => ({}));
         const collectUrl = result?.collectUrl || result?.data?.collectUrl || result?.url || result?.paymentUrl;
