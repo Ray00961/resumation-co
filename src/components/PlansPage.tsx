@@ -54,25 +54,30 @@ export default function PlansPage() {
 
     const init = async () => {
       try {
-        const lsKey = Object.keys(localStorage).find(
-          k => k.startsWith("sb-") && k.endsWith("-auth-token")
-        );
         let uid: string | null = null;
         let email: string | null = null;
-        
-        if (lsKey) {
-          try {
-            const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
-            uid   = cached?.user?.id   || null;
-            email = cached?.user?.email || cached?.user?.user_metadata?.email || null;
-          } catch { /* ignore parse errors */ }
+
+        // FIX: Always call getSession() first to properly initialize Supabase auth state
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          uid   = session.user.id;
+          email = session.user.email ?? null;
         }
-        
+
+        // Fallback to localStorage ONLY if getSession() didn't find a user
         if (!uid) {
-          const { data: { session } } = await supabase.auth.getSession();
-          uid   = session?.user?.id   || null;
-          email = session?.user?.email || session?.user?.user_metadata?.email || null;
+          const lsKey = Object.keys(localStorage).find(
+            k => k.startsWith("sb-") && k.endsWith("-auth-token")
+          );
+          if (lsKey) {
+            try {
+              const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+              uid   = cached?.user?.id   || null;
+              email = cached?.user?.email || cached?.user?.user_metadata?.email || null;
+            } catch { /* ignore parse errors */ }
+          }
         }
+
         if (!uid) { navigate("/login"); return; }
 
         setUserId(uid);
