@@ -92,7 +92,7 @@ export default function PlansPage() {
           .from("users")
           .select("first_name, referred_by")
           .eq("id", uid)
-          .single();
+          .maybeSingle(); // <--- هيك إذا ما لقت اسم ما بتوقف الكود وبتكمل طبيعي
 
         setUserName(userData?.first_name || "User");
 

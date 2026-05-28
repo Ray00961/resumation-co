@@ -385,8 +385,8 @@ export default function MyAccount() {
   const handleUpgrade = (item: ArchiveItem, target: string) => {
     if (target === 'analysis') { navigate('/analyse'); return; }
     if (target === 'edit')     { navigate(`/build/${item.form_id}`); return; }
-    const sid = item.submission_id || item.form_id;
-    navigate(`/plans?id=${sid}`);
+    // تعديل: إرسال form_id حصراً
+    navigate(`/plans?id=${item.form_id}`);
   };
 
   // ── Upgrade My Plan — calls create-cv-order → WishMoney/Paymob redirect ──
@@ -407,7 +407,7 @@ export default function MyAccount() {
       const region      = regionMatch?.[1] ?? "LB";
       const isEgypt     = region === "EG";
 
-      // 1. Send the correct Payload (submission_id instead of payment_id)
+      // 1. Send the correct Payload
       const res = await fetch(EF_URL, {
         method: "POST",
         headers: {
@@ -416,7 +416,7 @@ export default function MyAccount() {
         },
         body: JSON.stringify({
           user_id:        userId,
-          submission_id:  sid, // <--- FIXED: Match the Edge Function expectation
+          submission_id:  sid, // <--- Edge Function payload expects this, it's correct
           form_id:        item.form_id,
           plan:           "premium",
           amount:         isEgypt ? 250 : 25,
@@ -432,8 +432,9 @@ export default function MyAccount() {
       if (!res.ok || data.error) {
         console.error("Edge Function Error:", data.error || data);
         toast.error(`Payment Error: ${data.error || 'Failed to initialize payment'}`);
-        setUpgradingId(null); // Stop loading immediately
-        navigate(`/plans?id=${sid}`);
+        setUpgradingId(null);
+        // تعديل: التوجيه باستخدام form_id
+        navigate(`/plans?id=${item.form_id}`);
         return;
       }
 
@@ -452,17 +453,17 @@ export default function MyAccount() {
         console.error("No valid payment URL found in response:", data);
         toast.error(t.upgradeError);
         setUpgradingId(null);
-        navigate(`/plans?id=${sid}`);
+        // تعديل: التوجيه باستخدام form_id
+        navigate(`/plans?id=${item.form_id}`);
       }
 
     } catch (error) {
       console.error("Network or execution error:", error);
       toast.error(t.upgradeError);
       setUpgradingId(null);
-      navigate(`/plans?id=${sid}`);
+      // تعديل: التوجيه باستخدام form_id
+      navigate(`/plans?id=${item.form_id}`);
     } 
-    // We intentionally omit `finally { setUpgradingId(null) }` 
-    // so the button stays spinning until the browser navigates away.
   };
 
   const handleSetDefault = async (item: ArchiveItem) => {
@@ -748,8 +749,9 @@ export default function MyAccount() {
                                   >
                                     <Pencil className="w-3 h-3" /> {t.edit}
                                   </button>
+                                  {/* تعديل: التوجيه باستخدام form_id حصراً */}
                                   <button
-                                    onClick={() => navigate(`/plans?id=${item.submission_id || item.form_id}`)}
+                                    onClick={() => navigate(`/plans?id=${item.form_id}`)}
                                     className="border border-cyber-teal/30 text-cyber-teal hover:bg-cyber-teal hover:text-white px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all inline-flex items-center gap-1.5"
                                   >
                                     <ExternalLink className="w-3 h-3" /> {t.buildMyCv}
