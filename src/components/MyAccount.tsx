@@ -393,6 +393,7 @@ export default function MyAccount() {
   const handleUpgradePlan = async (item: ArchiveItem) => {
     setUpgradingId(item.form_id);
     const sid = item.submission_id || item.form_id;
+
     try {
       const EF_URL = import.meta.env.VITE_EF_CREATE_CV_ORDER as string;
       if (!EF_URL) throw new Error("no EF_URL");
@@ -406,7 +407,7 @@ export default function MyAccount() {
       const region      = regionMatch?.[1] ?? "LB";
       const isEgypt     = region === "EG";
 
-      // Always upgrade to Premium (most popular plan)
+      // 1. Send the correct Payload (submission_id instead of payment_id)
       const res = await fetch(EF_URL, {
         method: "POST",
         headers: {
@@ -415,7 +416,7 @@ export default function MyAccount() {
         },
         body: JSON.stringify({
           user_id:        userId,
-          payment_id:     sid,
+          submission_id:  sid, // <--- FIXED: Match the Edge Function expectation
           form_id:        item.form_id,
           plan:           "premium",
           amount:         isEgypt ? 250 : 25,
@@ -427,27 +428,41 @@ export default function MyAccount() {
 
       const data = await res.json().catch(() => ({}));
 
-      if (isEgypt) {
-        // Paymob — static checkout link
-        window.location.href =
-          "https://accept.paymobsolutions.com/standalone?ref=p_LRR2djFVeWg0SWhkQzY2dnM3WGQxOFl6Zz09X05IeWQra29pd29zUXRTRHF5QkpxMWc9PQ";
+      // 2. Check if the Edge Function returned an explicit error
+      if (!res.ok || data.error) {
+        console.error("Edge Function Error:", data.error || data);
+        toast.error(`Payment Error: ${data.error || 'Failed to initialize payment'}`);
+        setUpgradingId(null); // Stop loading immediately
+        navigate(`/plans?id=${sid}`);
         return;
       }
 
-      // Lebanon — WishMoney collectUrl
+      // 3. Handle Paymob (Egypt) Direct Redirect
+      if (isEgypt) {
+        const targetUrl = data.url || "https://accept.paymobsolutions.com/standalone?ref=p_LRR2djFVeWg0SWhkQzY2dnM3WGQxOFl6Zz09X05IeWQra29pd29zUXRTRHF5QkpxMWc9PQ";
+        window.location.assign(targetUrl);
+        return; 
+      }
+
+      // 4. Handle WishMoney (Lebanon) Dynamic Redirect
       const url = data?.collectUrl || data?.data?.collectUrl || data?.url || data?.paymentUrl;
       if (url) {
-        window.location.href = url.startsWith("http") ? url : `https://${url}`;
+        window.location.assign(url.startsWith("http") ? url : `https://${url}`);
       } else {
+        console.error("No valid payment URL found in response:", data);
         toast.error(t.upgradeError);
+        setUpgradingId(null);
         navigate(`/plans?id=${sid}`);
       }
-    } catch {
+
+    } catch (error) {
+      console.error("Network or execution error:", error);
       toast.error(t.upgradeError);
-      navigate(`/plans?id=${sid}`);
-    } finally {
       setUpgradingId(null);
-    }
+      navigate(`/plans?id=${sid}`);
+    } 
+    // We intentionally omit `finally { setUpgradingId(null) }` 
+    // so the button stays spinning until the browser navigates away.
   };
 
   const handleSetDefault = async (item: ArchiveItem) => {

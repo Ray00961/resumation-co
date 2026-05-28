@@ -149,11 +149,9 @@ export default function PlansPage() {
       let safeFormId   = formId || "";
       let safeSid      = submissionId || "";
 
-      // 🚨 BULLETPROOF FALLBACK: first try to resolve form_id from submission_id,
-      // then fallback to the latest cv_archive row for the user.
       if (!safeFormId) {
         const timeout20s = new Promise<{ data: null }>((resolve) =>
-          setTimeout(() => resolve({ data: null }), 20_000)
+          setTimeout(() => resolve({ data: null }), 10_000)
         );
 
         let data: { form_id: string; submission_id: string | null } | null = null;
@@ -252,79 +250,84 @@ export default function PlansPage() {
         "Authorization": `Bearer ${accessToken}`,
       };
 
-      if (isEgypt) {
-        const paymobRes = await fetch(EF_URL, {
-          method: "POST",
-          headers: authHeaders,
-          body: JSON.stringify({ ...body, payment_method: "paymob" }),
-          signal: AbortSignal.timeout(15_000),
-        });
-        const paymobResult = await paymobRes.json().catch(() => ({}));
+      // 🚨 إضافة متحكم قطع الطلب لمنع اللودينغ اللانهائي
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // يفصل بعد 15 ثانية
 
-        if (!paymobRes.ok && !paymobResult?.url) {
-          setPayError(paymobResult?.error || paymobResult?.message || "Payment gateway error — please try again.");
-          setLoading(null);
-          return;
-        }
-
-        const linkMap: Record<string, string> = {
-          premium:   PREMIUM_LINK_EGY,
-          gold:      GOLD_LINK_EGY,
-          ai_search: AI_SEARCH_LINK_EGY,
-        };
-        const baseLink = paymobResult?.url || linkMap[plan];
-        if (!baseLink) {
-          setPayError("Payment link not available — please try again.");
-          setLoading(null);
-          return;
-        }
-
-        const resolvedFormId = paymobResult?.form_id || safeFormId;
-        const cid = `${userId}---${resolvedFormId}`;
-
-        sessionStorage.setItem("rsm_plan", plan);
-
-        window.location.href = baseLink
-          + `&billing_data[first_name]=${encodeURIComponent(safeName)}`
-          + `&billing_data[last_name]=Customer`
-          + `&billing_data[email]=${encodeURIComponent(safeEmail)}`
-          + `&billing_data[phone_number]=01111111111`
-          + `&billing_data[street]=${encodeURIComponent(cid)}`
-          + `&merchant_order_id=${encodeURIComponent(cid)}`;
-
-      } else {
+      try {
         const res = await fetch(EF_URL, {
           method: "POST",
           headers: authHeaders,
-          body: JSON.stringify({ ...body, payment_method: "whish" }),
-          signal: AbortSignal.timeout(30_000),
+          body: JSON.stringify({ ...body, payment_method: isEgypt ? "paymob" : "whish" }),
+          signal: controller.signal, // ربط الطلب بالمتحكم
         });
+        
+        clearTimeout(timeoutId);
+
         const result = await res.json().catch(() => ({}));
-        const url = result?.url || result?.collectUrl || result?.data?.collectUrl || result?.paymentUrl;
-        if (url) {
-          let final = url.trim();
-          if (!final.startsWith("http")) final = `https://${final}`;
-          window.location.replace(final);
-        } else {
-          const errMsg = result?.error || result?.message || JSON.stringify(result);
-          console.error("WishMoney no url:", result);
-          setPayError(`Payment gateway error: ${errMsg}`);
-          setLoading(null);
+
+        if (!res.ok || result?.error) {
+           setPayError(result?.error || result?.message || "Payment gateway error — please try again.");
+           setLoading(null);
+           return;
         }
+
+        if (isEgypt) {
+          const linkMap: Record<string, string> = {
+            premium:   PREMIUM_LINK_EGY,
+            gold:      GOLD_LINK_EGY,
+            ai_search: AI_SEARCH_LINK_EGY,
+          };
+          const baseLink = result?.url || linkMap[plan];
+          if (!baseLink) {
+            setPayError("Payment link not available — please try again.");
+            setLoading(null);
+            return;
+          }
+
+          const resolvedFormId = result?.form_id || safeFormId;
+          const cid = `${userId}---${resolvedFormId}`;
+          sessionStorage.setItem("rsm_plan", plan);
+
+          window.location.assign(
+            baseLink
+            + `&billing_data[first_name]=${encodeURIComponent(safeName)}`
+            + `&billing_data[last_name]=Customer`
+            + `&billing_data[email]=${encodeURIComponent(safeEmail)}`
+            + `&billing_data[phone_number]=01111111111`
+            + `&billing_data[street]=${encodeURIComponent(cid)}`
+            + `&merchant_order_id=${encodeURIComponent(cid)}`
+          );
+        } else {
+          // Lebanon WishMoney Flow
+          const url = result?.url || result?.collectUrl || result?.data?.collectUrl || result?.paymentUrl;
+          if (url) {
+            let final = url.trim();
+            if (!final.startsWith("http")) final = `https://${final}`;
+            window.location.assign(final);
+          } else {
+            console.error("WishMoney no url:", result);
+            setPayError(`Invalid gateway response. Please try again.`);
+            setLoading(null);
+          }
+        }
+      } catch (fetchErr: unknown) {
+        clearTimeout(timeoutId);
+        const e = fetchErr as { name?: string; message?: string };
+        if (e?.name === "AbortError" || e?.name === "TimeoutError") {
+           setPayError("Payment gateway timed out. The Edge Function took too long to respond.");
+        } else {
+           setPayError(`Network Error: ${e?.message || 'Could not reach Edge Function.'}`);
+        }
+        setLoading(null);
       }
     } catch (err: unknown) {
-      const e = err as { name?: string };
-      if (e?.name === "TimeoutError" || e?.name === "AbortError") {
-        setPayError("Payment gateway timed out — please try again.");
-      } else {
-        console.warn("Payment error:", err);
-        setPayError("Network error — please try again.");
-      }
+      console.warn("Unexpected Payment error:", err);
+      setPayError("An unexpected error occurred — please try again.");
       setLoading(null);
     }
   };
 
-  // ── التعديل الجديد السريع לزر الخطة المجانية ──
   const handleFreePlan = async () => {
     setLoading("free");
     setPayError(null);
@@ -332,10 +335,9 @@ export default function PlansPage() {
     let safeFormId = formId || "";
     let safeSid = submissionId || "";
 
-    // فحص احتياطي لضمان الروابط الصحيحة لصفحة البناء
     if (!safeFormId && userId) {
       const timeout20s = new Promise<{ data: null }>((resolve) =>
-        setTimeout(() => resolve({ data: null }), 20_000)
+        setTimeout(() => resolve({ data: null }), 10_000)
       );
       const { data } = await Promise.race([
         supabase
@@ -361,7 +363,6 @@ export default function PlansPage() {
       return;
     }
 
-    // نقل مباشر لصفحة البناء بعد تأخير بسيط للأنيميشن
     setTimeout(() => {
       navigate(`/building?sid=${encodeURIComponent(safeSid)}&fid=${encodeURIComponent(safeFormId)}`);
     }, 600);
