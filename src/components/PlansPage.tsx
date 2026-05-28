@@ -92,7 +92,7 @@ export default function PlansPage() {
           .from("users")
           .select("first_name, referred_by")
           .eq("id", uid)
-          .maybeSingle(); // <--- هيك إذا ما لقت اسم ما بتوقف الكود وبتكمل طبيعي
+          .maybeSingle();
 
         setUserName(userData?.first_name || "User");
 
@@ -250,16 +250,15 @@ export default function PlansPage() {
         "Authorization": `Bearer ${accessToken}`,
       };
 
-      // 🚨 إضافة متحكم قطع الطلب لمنع اللودينغ اللانهائي
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // يفصل بعد 15 ثانية
+      const timeoutId = setTimeout(() => controller.abort(), 15000); 
 
       try {
         const res = await fetch(EF_URL, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ ...body, payment_method: isEgypt ? "paymob" : "whish" }),
-          signal: controller.signal, // ربط الطلب بالمتحكم
+          signal: controller.signal, 
         });
         
         clearTimeout(timeoutId);
@@ -287,6 +286,7 @@ export default function PlansPage() {
 
           const resolvedFormId = result?.form_id || safeFormId;
           const cid = `${userId}---${resolvedFormId}`;
+
           sessionStorage.setItem("rsm_plan", plan);
 
           window.location.assign(
@@ -298,8 +298,8 @@ export default function PlansPage() {
             + `&billing_data[street]=${encodeURIComponent(cid)}`
             + `&merchant_order_id=${encodeURIComponent(cid)}`
           );
+
         } else {
-          // Lebanon WishMoney Flow
           const url = result?.url || result?.collectUrl || result?.data?.collectUrl || result?.paymentUrl;
           if (url) {
             let final = url.trim();
