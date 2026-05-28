@@ -185,7 +185,7 @@ Deno.serve(async (req) => {
           "User-Agent":   "Whish/1.0 (https://whish.money; support@whish.money)",
         },
         body: JSON.stringify({
-          amount,
+          amount:     String(amount),
           currency:   currency || "USD",
           invoice:    `Resumation ${plan} plan`,
           externalId: wmExternalId,
