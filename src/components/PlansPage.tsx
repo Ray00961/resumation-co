@@ -149,25 +149,46 @@ export default function PlansPage() {
       let safeFormId   = formId || "";
       let safeSid      = submissionId || "";
 
-      // 🚨 BULLETPROOF FALLBACK: فحص طوارئ لجلب ה־ ID إذا كان مفقوداً من ה־ React State
+      // 🚨 BULLETPROOF FALLBACK: first try to resolve form_id from submission_id,
+      // then fallback to the latest cv_archive row for the user.
       if (!safeFormId) {
         const timeout20s = new Promise<{ data: null }>((resolve) =>
           setTimeout(() => resolve({ data: null }), 20_000)
         );
-        const { data } = await Promise.race([
-          supabase
+
+        let data: { form_id: string; submission_id: string | null } | null = null;
+
+        if (safeSid) {
+          const bySid = supabase
             .from("cv_archive")
             .select("form_id, submission_id")
             .eq("user_id", userId)
+            .eq("submission_id", safeSid)
             .order("created_at_utc", { ascending: false })
             .limit(1)
-            .maybeSingle(),
-          timeout20s,
-        ]);
+            .maybeSingle();
+
+          const result = await Promise.race([bySid, timeout20s]);
+          data = result?.data ?? null;
+        }
+
+        if (!data) {
+          const latest = await Promise.race([
+            supabase
+              .from("cv_archive")
+              .select("form_id, submission_id")
+              .eq("user_id", userId)
+              .order("created_at_utc", { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+            timeout20s,
+          ]);
+          data = latest?.data ?? null;
+        }
 
         if (data) {
           safeFormId = data.form_id;
-          safeSid    = data.submission_id || "";
+          safeSid    = data.submission_id || safeSid;
           setFormId(safeFormId);
           setSubmissionId(safeSid);
         } else {
