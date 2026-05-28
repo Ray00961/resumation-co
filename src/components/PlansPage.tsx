@@ -151,13 +151,19 @@ export default function PlansPage() {
 
       // 🚨 BULLETPROOF FALLBACK: فحص طوارئ لجلب ה־ ID إذا كان مفقوداً من ה־ React State
       if (!safeFormId) {
-        const { data } = await supabase
-          .from("cv_archive")
-          .select("form_id, submission_id")
-          .eq("user_id", userId)
-          .order("created_at_utc", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const timeout20s = new Promise<{ data: null }>((resolve) =>
+          setTimeout(() => resolve({ data: null }), 20_000)
+        );
+        const { data } = await Promise.race([
+          supabase
+            .from("cv_archive")
+            .select("form_id, submission_id")
+            .eq("user_id", userId)
+            .order("created_at_utc", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          timeout20s,
+        ]);
 
         if (data) {
           safeFormId = data.form_id;
@@ -307,13 +313,19 @@ export default function PlansPage() {
 
     // فحص احتياطي لضمان الروابط الصحيحة لصفحة البناء
     if (!safeFormId && userId) {
-      const { data } = await supabase
-        .from("cv_archive")
-        .select("form_id, submission_id")
-        .eq("user_id", userId)
-        .order("created_at_utc", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const timeout20s = new Promise<{ data: null }>((resolve) =>
+        setTimeout(() => resolve({ data: null }), 20_000)
+      );
+      const { data } = await Promise.race([
+        supabase
+          .from("cv_archive")
+          .select("form_id, submission_id")
+          .eq("user_id", userId)
+          .order("created_at_utc", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        timeout20s,
+      ]);
 
       if (data) {
         safeFormId = data.form_id;
