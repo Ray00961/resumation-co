@@ -34,3 +34,6 @@ enable_signup = true
 
 [edge_runtime]
 enabled = true
+
+[functions.webhook-wishmoney]
+verify_jwt = false
