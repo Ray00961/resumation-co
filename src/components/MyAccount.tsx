@@ -20,6 +20,10 @@ interface ArchiveItem {
   created_at_beirut?: string;
   cv_pdf_url: string | null;
   cv_file_path?: string | null;
+  cl_pdf_url?: string | null;
+  cl_file_path?: string | null;
+  generation_id?: string | null;
+  payment_method?: string | null;
   submission_id?: string | null;
   cv_target_job?: string;     // renamed from target_job
   cv_first_name?: string;     // replaces user_name
@@ -62,6 +66,9 @@ const TRANSLATIONS = {
     ready:             "Ready",
     processing:        "Processing",
     download:          "Download",
+    downloadCv:        "Download CV",
+    coverLetter:       "Cover Letter",
+    professionalBundle:"Professional Bundle",
     upgradePremium:    "Upgrade Premium",
     goldPlan:          "Gold Plan",
     analyzeCv:         "Analyze CV",
@@ -112,6 +119,9 @@ const TRANSLATIONS = {
     ready:             "جاهز",
     processing:        "قيد المعالجة",
     download:          "تحميل",
+    downloadCv:        "تحميل السيرة",
+    coverLetter:       "رسالة التغطية",
+    professionalBundle:"الحزمة المهنية",
     upgradePremium:    "ترقية Premium",
     goldPlan:          "باقة Gold",
     analyzeCv:         "تحليل السيرة",
@@ -327,35 +337,34 @@ export default function MyAccount() {
       : (item.cv_first_name || item.cv_data?.fullName || item.username || userName);
     const displayName = rawName.toUpperCase();
     if (item.computedType === 'analysis') return { name: `ATS ANALYSIS — ${displayName}`, icon: <AlertCircle className="w-4 h-4 text-amber-400" />, color: "bg-amber-500/10 border-amber-500/20" };
-    if (item.computedType === 'cover')   return { name: `COVER LETTER — ${displayName}`, icon: <FileType className="w-4 h-4 text-cyber-cyan" />, color: "bg-cyber-teal/10 border-cyber-teal/20" };
-    return { name: `PROFESSIONAL CV — ${displayName}`, icon: <FileText className="w-4 h-4 text-cyber-cyan" />, color: "bg-cyber-cyan/10 border-cyber-cyan/20" };
+    return { name: `${t.professionalBundle.toUpperCase()} — ${displayName}`, icon: <FileText className="w-4 h-4 text-cyber-cyan" />, color: "bg-cyber-cyan/10 border-cyber-cyan/20" };
   };
 
-  const handleDownload = async (item: ArchiveItem) => {
-    setDownloadingId(item.form_id);
+  const handleDownload = async (item: ArchiveItem, docType: "cv" | "cl" = "cv") => {
+    const downloadKey = `${item.form_id}-${docType}`;
+    setDownloadingId(downloadKey);
+
     try {
-      let downloadUrl: string | null = null;
+      const filePath = docType === "cv" ? item.cv_file_path : item.cl_file_path;
+      const signedUrl = docType === "cv" ? item.cv_pdf_url : item.cl_pdf_url;
 
-      // cv_file_path for free plan = inline HTML string (starts with "<")
-      // cv_file_path for paid plan = storage path (e.g. "uid/subid.docx")
-      const isStoragePath = item.cv_file_path
-        ? !item.cv_file_path.trimStart().startsWith('<')
+      let downloadUrl: string | null = signedUrl || null;
+
+      // Storage path only. Inline HTML/free-plan strings are intentionally ignored in Downloads.
+      const isStoragePath = filePath
+        ? !filePath.trimStart().startsWith('<')
         : false;
-      const ext      = (isStoragePath && item.cv_file_path?.endsWith('.html')) ? 'html' : 'docx';
+
+      const fallbackExt = filePath?.endsWith('.html') ? 'html' : 'docx';
       const fileName = isStoragePath
-        ? (item.cv_file_path?.split('/').pop() || `cv-document.${ext}`)
-        : `resumation-cv.${ext}`;
+        ? (filePath?.split('/').pop() || `resumation-${docType}.${fallbackExt}`)
+        : `resumation-${docType}.${fallbackExt}`;
 
-      // 1. cv_pdf_url → preferred (signed URL already ready)
-      if (item.cv_pdf_url) {
-        downloadUrl = item.cv_pdf_url;
-      }
-
-      // 2. cv_file_path (storage path only) → generate fresh signed URL
-      if (!downloadUrl && isStoragePath && item.cv_file_path) {
+      // If the signed URL expired or was not stored, create a fresh one from the storage path.
+      if (!downloadUrl && isStoragePath && filePath) {
         const { data } = await supabase.storage
           .from('cv-documents')
-          .createSignedUrl(item.cv_file_path, 300);
+          .createSignedUrl(filePath, 300);
         if (data?.signedUrl) downloadUrl = data.signedUrl;
       }
 
@@ -563,6 +572,13 @@ export default function MyAccount() {
       setDeleting(false);
     }
   };
+
+
+  const hasGeneratedDocs = (item: ArchiveItem) =>
+    !!(item.cv_pdf_url || item.cv_file_path || item.cl_pdf_url || item.cl_file_path);
+
+  // Downloads view must show generated/paid bundles only — not raw cv_archive form submissions.
+  const downloadableArchive = archive.filter(hasGeneratedDocs);
 
 
   if (loading) return (
@@ -787,16 +803,19 @@ export default function MyAccount() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {archive.length === 0 ? (
+                    {downloadableArchive.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="p-20 text-center text-cyber-dim font-bold uppercase tracking-widest text-xs italic">
                           {t.noRecords}
                         </td>
                       </tr>
                     ) : (
-                      archive.map((item) => {
+                      downloadableArchive.map((item) => {
                         const docInfo       = getDocDetails(item);
-                        const isDownloading = downloadingId === item.form_id;
+                        const hasCv         = !!(item.cv_pdf_url || item.cv_file_path);
+                        const hasCl         = !!(item.cl_pdf_url || item.cl_file_path);
+                        const isDownloadingCv = downloadingId === `${item.form_id}-cv`;
+                        const isDownloadingCl = downloadingId === `${item.form_id}-cl`;
                         const isUpgrading   = upgradingId   === item.form_id;
                         const isFreeRow     = (item.package_name || 'free').toLowerCase() === 'free';
                         return (
@@ -836,7 +855,7 @@ export default function MyAccount() {
                               </span>
                             </td>
                             <td className="px-6 py-5 text-center">
-                              {item.cv_pdf_url || item.cv_file_path ? (
+                              {hasCv || hasCl ? (
                                 <span className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 inline-flex items-center gap-1.5">
                                   <CheckCircle2 className="w-3 h-3" /> {t.ready}
                                 </span>
@@ -848,17 +867,31 @@ export default function MyAccount() {
                             </td>
                             <td className="px-6 py-5">
                               <div className={`flex items-center ${isRtl ? 'justify-start' : 'justify-end'} gap-2 flex-wrap`}>
-                                {(item.cv_pdf_url || item.cv_file_path) && (
+                                {hasCv && (
                                   <button
-                                    onClick={() => handleDownload(item)}
-                                    disabled={isDownloading}
+                                    onClick={() => handleDownload(item, "cv")}
+                                    disabled={isDownloadingCv}
                                     className="bg-cyber-teal/10 text-cyber-teal border border-cyber-teal/20 px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-cyber-teal hover:text-white transition-all inline-flex items-center gap-2 group shadow-lg"
                                   >
-                                    {isDownloading
+                                    {isDownloadingCv
                                       ? <Loader2 className="w-3 h-3 animate-spin" />
                                       : <Download className="w-3 h-3 group-hover:translate-y-0.5 transition-transform" />
                                     }
-                                    {t.download}
+                                    {t.downloadCv}
+                                  </button>
+                                )}
+
+                                {hasCl && (
+                                  <button
+                                    onClick={() => handleDownload(item, "cl")}
+                                    disabled={isDownloadingCl}
+                                    className="bg-cyber-cyan/10 text-cyber-cyan border border-cyber-cyan/20 px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-cyber-cyan hover:text-white transition-all inline-flex items-center gap-2 group shadow-lg"
+                                  >
+                                    {isDownloadingCl
+                                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                                      : <FileType className="w-3 h-3" />
+                                    }
+                                    {t.coverLetter}
                                   </button>
                                 )}
                                 {/* ── Analyse CV — direct link with subid ── */}
