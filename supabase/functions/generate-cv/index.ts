@@ -1133,11 +1133,11 @@ Deno.serve(async (req) => {
 
     const [cvUpload, clUpload] = await Promise.all([
       db.storage.from("cv-documents").upload(cvFilePath, encoder.encode(cvHtml), {
-        contentType: "text/html",
+        contentType: "application/octet-stream",
         upsert: true,
       }),
       db.storage.from("cv-documents").upload(clFilePath, encoder.encode(clHtml), {
-        contentType: "text/html",
+        contentType: "application/octet-stream",
         upsert: true,
       }),
     ]);
