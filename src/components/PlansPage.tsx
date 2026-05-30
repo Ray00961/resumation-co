@@ -64,17 +64,13 @@ export default function PlansPage() {
           email = session.user.email ?? null;
         }
 
-        // Fallback to localStorage ONLY if getSession() didn't find a user
+        // Fallback: getUser() forces a server round-trip and handles token refresh.
+        // Never read uid from localStorage — it may be stale.
         if (!uid) {
-          const lsKey = Object.keys(localStorage).find(
-            k => k.startsWith("sb-") && k.endsWith("-auth-token")
-          );
-          if (lsKey) {
-            try {
-              const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
-              uid   = cached?.user?.id   || null;
-              email = cached?.user?.email || cached?.user?.user_metadata?.email || null;
-            } catch { /* ignore parse errors */ }
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            uid   = user.id;
+            email = user.email ?? null;
           }
         }
 
@@ -145,17 +141,33 @@ export default function PlansPage() {
     setPayError(null);
 
     try {
-      if (!userId) {
+      // Always resolve uid and access_token from a live session.
+      // Never read from stale React state or localStorage — either may be from
+      // before the bailout fired or may carry an expired token.
+      const { data: { session: liveSession } } = await supabase.auth.getSession();
+      const liveUid         = liveSession?.user?.id   ?? userId ?? null;
+      const liveAccessToken = liveSession?.access_token          ?? null;
+
+      if (!liveUid) {
         setPayError("Session error — please refresh the page.");
         setLoading(null);
         return;
       }
 
-      let safeFormId   = formId || "";
-      let safeSid      = submissionId || "";
+      if (!liveAccessToken) {
+        setPayError("Session expired — please reload the page.");
+        setLoading(null);
+        return;
+      }
+
+      // Sync state if the 8-second bailout rendered plans before init() set userId.
+      if (liveUid !== userId) setUserId(liveUid);
+
+      let safeFormId = formId || "";
+      let safeSid    = submissionId || "";
 
       if (!safeFormId) {
-        const timeout20s = new Promise<{ data: null }>((resolve) =>
+        const timeout10s = new Promise<{ data: null }>((resolve) =>
           setTimeout(() => resolve({ data: null }), 10_000)
         );
 
@@ -165,13 +177,13 @@ export default function PlansPage() {
           const bySid = supabase
             .from("cv_archive")
             .select("form_id, submission_id")
-            .eq("user_id", userId)
+            .eq("user_id", liveUid)
             .eq("submission_id", safeSid)
             .order("created_at_utc", { ascending: false })
             .limit(1)
             .maybeSingle();
 
-          const result = await Promise.race([bySid, timeout20s]);
+          const result = await Promise.race([bySid, timeout10s]);
           data = result?.data ?? null;
         }
 
@@ -180,11 +192,11 @@ export default function PlansPage() {
             supabase
               .from("cv_archive")
               .select("form_id, submission_id")
-              .eq("user_id", userId)
+              .eq("user_id", liveUid)
               .order("created_at_utc", { ascending: false })
               .limit(1)
               .maybeSingle(),
-            timeout20s,
+            timeout10s,
           ]);
           data = latest?.data ?? null;
         }
@@ -204,40 +216,15 @@ export default function PlansPage() {
       const EF_URL = (import.meta.env.VITE_EF_CREATE_CV_ORDER as string) ||
         "https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/create-cv-order";
 
-      let accessToken: string | undefined;
-
-      try {
-        const lsKey = Object.keys(localStorage).find(
-          k => k.startsWith("sb-") && k.endsWith("-auth-token")
-        );
-        if (lsKey) {
-          const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
-          accessToken = cached?.access_token || cached?.session?.access_token;
-        }
-      } catch { /* تجاهل الأخطاء */ }
-
-      if (!accessToken) {
-        try {
-          const { data: { session: paySession } } = await supabase.auth.getSession();
-          accessToken = paySession?.access_token;
-        } catch { /* fall through */ }
-      }
-
-      if (!accessToken) {
-        setPayError("Session expired — please reload the page.");
-        setLoading(null);
-        return;
-      }
-
-      const safeEmail    = userEmail || "";
-      const safeName     = userName || "User";
-      const safeRegion   = userRegion || "LB";
+      const safeEmail  = userEmail || "";
+      const safeName   = userName || "User";
+      const safeRegion = userRegion || "LB";
 
       const amt = finalPrice(plan);
       const cur = isEgypt ? "EGP" : "USD";
 
       const body = {
-        user_id:       userId,
+        user_id:       liveUid,
         email:         safeEmail,
         full_name:     safeName,
         form_id:       safeFormId,
@@ -252,7 +239,7 @@ export default function PlansPage() {
 
       const authHeaders = {
         "Content-Type":  "application/json",
-        "Authorization": `Bearer ${accessToken}`,
+        "Authorization": `Bearer ${liveAccessToken}`,
       };
 
       const controller = new AbortController();
@@ -265,7 +252,7 @@ export default function PlansPage() {
           body: JSON.stringify({ ...body, payment_method: isEgypt ? "paymob" : "whish" }),
           signal: controller.signal, 
         });
-        
+
         clearTimeout(timeoutId);
 
         const result = await res.json().catch(() => ({}));
@@ -282,6 +269,7 @@ export default function PlansPage() {
             gold:      GOLD_LINK_EGY,
             ai_search: AI_SEARCH_LINK_EGY,
           };
+
           const baseLink = result?.url || linkMap[plan];
           if (!baseLink) {
             setPayError("Payment link not available — please try again.");
@@ -290,7 +278,7 @@ export default function PlansPage() {
           }
 
           const resolvedFormId = result?.form_id || safeFormId;
-          const cid = `${userId}---${resolvedFormId}`;
+          const cid = `${liveUid}---${resolvedFormId}`;
 
           sessionStorage.setItem("rsm_plan", plan);
 
