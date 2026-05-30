@@ -35,6 +35,21 @@ const LoginPage = () => {
 
   const setStepSync = (s: Step) => { stepRef.current = s; setStep(s); };
 
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
   const t = {
     en: {
       tagline:       "AI Secure Portal",
@@ -128,7 +143,7 @@ const LoginPage = () => {
         if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
           if (handledRef.current) return;
           handledRef.current = true;
-          await handlePostLogin(session.user.id, session.user);
+          await handlePostLogin(session);
         }
 
         if (event === "SIGNED_OUT") {
@@ -161,8 +176,20 @@ const LoginPage = () => {
     };
   }, []);
 
-  const handlePostLogin = async (uid: string, user: any) => {
+  const handlePostLogin = async (session: any) => {
     setProcessing(true);
+
+    const user = session?.user;
+    const uid = user?.id || "";
+    const accessToken = session?.access_token || "";
+
+    if (!uid) {
+      handledRef.current = false;
+      setProcessing(false);
+      toast.error(isRtl ? "انتهت الجلسة، سجّل الدخول مجدداً" : "Session expired. Please sign in again.");
+      return;
+    }
+
     setUserId(uid);
 
     processingRef.current = setTimeout(() => {
@@ -178,10 +205,8 @@ const LoginPage = () => {
         const pending = localStorage.getItem("pending_user_data");
         const parsed  = pending ? JSON.parse(pending) : {};
 
-        // Get fresh JWT token to authenticate the request
-        const { data: { session: liveSession } } = await supabase.auth.getSession();
-        const accessToken = liveSession?.access_token;
-
+        // Use the OAuth session token from the auth event directly.
+        // Do NOT call getSession() here; it can hang on stale/locked auth storage.
         if (accessToken) {
           fetch(EF_USER_SYNC, {
             method: "POST",
@@ -203,11 +228,15 @@ const LoginPage = () => {
         if (pending) localStorage.removeItem("pending_user_data");
       }
 
-      const { data: userData, error } = await supabase
-        .from("users")
-        .select("username, first_name")
-        .eq("id", uid)
-        .maybeSingle();
+      const { data: userData, error } = await withTimeout(
+        supabase
+          .from("users")
+          .select("username, first_name")
+          .eq("id", uid)
+          .maybeSingle(),
+        10000,
+        "users profile lookup"
+      );
 
       if (error) throw error;
 
@@ -228,6 +257,13 @@ const LoginPage = () => {
         if (processingRef.current) clearTimeout(processingRef.current);
         return;
       }
+
+      if (String(err?.message || "").includes("users profile lookup timed out")) {
+        // Auth succeeded, but the profile query stalled. Do not strand the user on /login.
+        window.location.replace("/dashboard");
+        return;
+      }
+
       handledRef.current = false;
       setProcessing(false);
       toast.error(isRtl ? "حدث خطأ، حاول مجدداً" : "Something went wrong. Please try again.");

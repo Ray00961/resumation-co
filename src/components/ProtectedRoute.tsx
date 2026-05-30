@@ -7,12 +7,61 @@ interface Props {
   children: React.ReactNode;
 }
 
+function readCachedSupabaseUserId(): string | null {
+  const lsKey = Object.keys(localStorage).find(
+    k => k.startsWith("sb-") && k.endsWith("-auth-token")
+  );
+
+  if (!lsKey) return null;
+
+  try {
+    const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+
+    const userId =
+      cached?.user?.id ||
+      cached?.session?.user?.id ||
+      cached?.currentSession?.user?.id ||
+      null;
+
+    const expiresAt =
+      cached?.expires_at ||
+      cached?.session?.expires_at ||
+      cached?.currentSession?.expires_at ||
+      null;
+
+    if (!userId) return null;
+
+    // If an expiry exists and is clearly expired, do not trust the fast path.
+    if (expiresAt && Number(expiresAt) * 1000 < Date.now() - 60_000) {
+      return null;
+    }
+
+    return userId;
+  } catch {
+    return null;
+  }
+}
+
+async function getSessionWithTimeout(ms = 5000) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      supabase.auth.getSession(),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Wraps any route that requires authentication.
- * - Reads localStorage first (instant, no network)
- * - Falls back to supabase.auth.getSession() if localStorage is empty
- * - Shows a spinner while checking (no flash of protected content)
- * - Redirects to /login if not authenticated
+ * - Trusts a valid cached Supabase user first for instant navigation.
+ * - Falls back to getSession() with a timeout.
+ * - Never leaves the app stuck because Supabase auth storage is locked.
  */
 export default function ProtectedRoute({ children }: Props) {
   const navigate  = useNavigate();
@@ -20,37 +69,48 @@ export default function ProtectedRoute({ children }: Props) {
   const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
-    const verify = async () => {
-      // 1. Fast path — read Supabase session from localStorage
-      const lsKey = Object.keys(localStorage).find(
-        k => k.startsWith("sb-") && k.endsWith("-auth-token")
-      );
-      if (lsKey) {
-        try {
-          const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
-          if (cached?.user?.id) {
-            setAllowed(true);
-            setChecked(true);
-            return;
-          }
-        } catch {}
-      }
+    let cancelled = false;
 
-      // 2. Fallback — ask Supabase (network call)
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          setAllowed(true);
-          setChecked(true);
-          return;
-        }
-      } catch {}
+    const allow = () => {
+      if (cancelled) return;
+      setAllowed(true);
+      setChecked(true);
+    };
 
-      // 3. Not authenticated — redirect
+    const reject = () => {
+      if (cancelled) return;
+      setAllowed(false);
+      setChecked(true);
       navigate("/login", { replace: true });
     };
 
+    const verify = async () => {
+      const cachedUserId = readCachedSupabaseUserId();
+      if (cachedUserId) {
+        allow();
+        return;
+      }
+
+      try {
+        const result: any = await getSessionWithTimeout(5000);
+        const session = result?.data?.session;
+
+        if (session?.user?.id) {
+          allow();
+          return;
+        }
+      } catch {
+        // fall through
+      }
+
+      reject();
+    };
+
     verify();
+
+    return () => {
+      cancelled = true;
+    };
   }, [navigate]);
 
   if (!checked) {
