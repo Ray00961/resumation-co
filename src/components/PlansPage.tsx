@@ -8,6 +8,93 @@ import { useLang } from "../context/LanguageContext";
 
 type PlanType = "free" | "premium" | "gold" | "ai_search";
 
+function readValidSupabaseAuthFromStorage(): { userId: string; email: string | null; accessToken: string } | null {
+  try {
+    const key = Object.keys(localStorage).find(k => /^sb-.+-auth-token$/.test(k));
+    if (!key) return null;
+
+    console.log("[localStorage] token found, key:", key);
+
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+
+    let cached: unknown;
+    try {
+      cached = JSON.parse(raw);
+    } catch (_e) {
+      console.warn("[localStorage] token parse failed — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    if (!cached || typeof cached !== "object") {
+      console.warn("[localStorage] token not an object — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    const c = cached as Record<string, unknown>;
+    let accessToken: string | null = null;
+    let user: Record<string, unknown> | null = null;
+
+    // Shape 1: cached.access_token + cached.user
+    if (typeof c.access_token === "string" && c.user && typeof c.user === "object") {
+      accessToken = c.access_token;
+      user = c.user as Record<string, unknown>;
+    // Shape 2: cached.session.access_token + cached.session.user
+    } else if (c.session && typeof c.session === "object") {
+      const s = c.session as Record<string, unknown>;
+      if (typeof s.access_token === "string" && s.user && typeof s.user === "object") {
+        accessToken = s.access_token;
+        user = s.user as Record<string, unknown>;
+      }
+    }
+
+    if (!accessToken || !user) {
+      console.warn("[localStorage] token shape unrecognized — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    // Decode JWT and verify exp >= now + 60s
+    try {
+      const parts = accessToken.split(".");
+      if (parts.length !== 3) throw new Error("not a JWT");
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+      const exp = typeof payload.exp === "number" ? payload.exp : null;
+      const nowSecs = Math.floor(Date.now() / 1000);
+      if (!exp || exp - nowSecs < 60) {
+        console.warn("[localStorage] token expired or expires within 60s — removing key", {
+          exp,
+          nowSecs,
+          diff: exp ? exp - nowSecs : null,
+        });
+        localStorage.removeItem(key);
+        return null;
+      }
+    } catch (_e) {
+      console.warn("[localStorage] JWT decode failed — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    const userId = typeof user.id === "string" ? user.id : null;
+    const email  = typeof user.email === "string" ? user.email : null;
+
+    if (!userId) {
+      console.warn("[localStorage] token missing user.id — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    console.log("[localStorage] token valid:", { userId, email });
+    return { userId, email, accessToken };
+  } catch (err) {
+    console.warn("[localStorage] unexpected error reading token:", err);
+    return null;
+  }
+}
+
 export default function PlansPage() {
   const navigate = useNavigate();
   const { lang, isRtl } = useLang();
@@ -59,29 +146,39 @@ export default function PlansPage() {
 
         console.log("[PlansPage:init] start auth resolution");
 
-        const sessionResult = await Promise.race([
-          supabase.auth.getSession(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
-        ]);
-
-        if (!sessionResult) {
-          console.warn("[PlansPage:init] getSession timed out after 10s");
+        // Fast path: use localStorage token if valid and not expired
+        const localAuth = readValidSupabaseAuthFromStorage();
+        if (localAuth) {
+          console.log("[PlansPage:init] using local token path");
+          uid   = localAuth.userId;
+          email = localAuth.email;
         }
 
-        const session = sessionResult?.data?.session ?? null;
-        console.log("[PlansPage:init] getSession result:", {
-          hasSession: !!session,
-          userId: session?.user?.id ?? null,
-          email: session?.user?.email ?? null,
-        });
+        if (!uid) {
+          console.log("[PlansPage:init] fallback to getSession");
+          const sessionResult = await Promise.race([
+            supabase.auth.getSession(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+          ]);
 
-        if (session?.user) {
-          uid   = session.user.id;
-          email = session.user.email ?? null;
+          if (!sessionResult) {
+            console.warn("[PlansPage:init] getSession timed out after 10s");
+          }
+
+          const session = sessionResult?.data?.session ?? null;
+          console.log("[PlansPage:init] getSession result:", {
+            hasSession: !!session,
+            userId: session?.user?.id ?? null,
+            email: session?.user?.email ?? null,
+          });
+
+          if (session?.user) {
+            uid   = session.user.id;
+            email = session.user.email ?? null;
+          }
         }
 
         // Fallback: getUser() forces a server round-trip and handles token refresh.
-        // Never read uid from localStorage — it may be stale.
         if (!uid) {
           console.log("[PlansPage:init] start getUser fallback");
 
@@ -187,33 +284,46 @@ export default function PlansPage() {
     setPayError(null);
 
     try {
-      // Always resolve uid and access_token from a live session.
-      // Never read from stale React state or localStorage — either may be from
-      // before the bailout fired or may carry an expired token.
-      console.log("[handlePaidPlan] 3. start getSession()");
+      let liveUid: string | null         = null;
+      let liveAccessToken: string | null = null;
 
-      const liveSessionResult = await Promise.race([
-        supabase.auth.getSession(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
-      ]);
-
-      if (!liveSessionResult) {
-        console.warn("[handlePaidPlan] RETURN: getSession timed out after 10s");
-        setPayError("Session check timed out — please reload the page.");
-        setLoading(null);
-        return;
+      // Fast path: use localStorage token if valid and not expired
+      const localAuth = readValidSupabaseAuthFromStorage();
+      if (localAuth) {
+        console.log("[handlePaidPlan] using local token path");
+        liveUid         = localAuth.userId;
+        liveAccessToken = localAuth.accessToken;
       }
 
-      const liveSession = liveSessionResult.data.session;
-      console.log("[handlePaidPlan] 4. getSession() result:", {
-        hasSession: !!liveSession,
-        userId: liveSession?.user?.id ?? null,
-        email: liveSession?.user?.email ?? null,
-        hasAccessToken: !!liveSession?.access_token,
-      });
+      if (!liveUid || !liveAccessToken) {
+        console.log("[handlePaidPlan] 3. start getSession()");
+        console.log("[handlePaidPlan] fallback to getSession");
 
-      const liveUid         = liveSession?.user?.id   ?? userId ?? null;
-      const liveAccessToken = liveSession?.access_token          ?? null;
+        const liveSessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+        ]);
+
+        if (!liveSessionResult) {
+          console.warn("[handlePaidPlan] RETURN: getSession timed out after 10s");
+          setPayError("Session check timed out — please reload the page.");
+          setLoading(null);
+          return;
+        }
+
+        const liveSession = liveSessionResult.data.session;
+        console.log("[handlePaidPlan] 4. getSession() result:", {
+          hasSession: !!liveSession,
+          userId: liveSession?.user?.id ?? null,
+          email: liveSession?.user?.email ?? null,
+          hasAccessToken: !!liveSession?.access_token,
+        });
+
+        liveUid         = liveSession?.user?.id   ?? userId ?? null;
+        liveAccessToken = liveSession?.access_token          ?? null;
+
+        console.log("[handlePaidPlan] using getSession path");
+      }
 
       console.log("[handlePaidPlan] 5. liveUid:", liveUid);
       console.log("[handlePaidPlan] 6. liveAccessToken exists:", !!liveAccessToken);
@@ -235,8 +345,18 @@ export default function PlansPage() {
       // Sync state if the 8-second bailout rendered plans before init() set userId.
       if (liveUid !== userId) setUserId(liveUid);
 
-      let safeFormId = formId || "";
-      let safeSid    = submissionId || "";
+      const params = new URLSearchParams(window.location.search);
+      const idFromUrl = params.get("id") || "";
+      const isUrlUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idFromUrl);
+
+      let safeFormId = formId || (isUrlUuid ? idFromUrl : "");
+      let safeSid    = submissionId || (!isUrlUuid ? idFromUrl : "");
+
+      if (safeFormId && !formId) {
+        console.log("[handlePaidPlan] using form_id directly from URL:", safeFormId);
+        setFormId(safeFormId);
+      }
 
       if (!safeFormId) {
         console.log("[handlePaidPlan] 7. safeFormId empty — start cv_archive lookup", { safeSid, liveUid });
@@ -427,8 +547,13 @@ export default function PlansPage() {
     setLoading("free");
     setPayError(null);
 
-    let safeFormId = formId || "";
-    let safeSid = submissionId || "";
+    const params = new URLSearchParams(window.location.search);
+    const idFromUrl = params.get("id") || "";
+    const isUrlUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idFromUrl);
+
+    let safeFormId = formId || (isUrlUuid ? idFromUrl : "");
+    let safeSid = submissionId || (!isUrlUuid ? idFromUrl : "");
 
     if (!safeFormId && userId) {
       const timeout20s = new Promise<{ data: null }>((resolve) =>

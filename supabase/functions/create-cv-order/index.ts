@@ -15,8 +15,8 @@ const WISHMONEY_API     = _WM_BASE.endsWith("/payment/whish") ? _WM_BASE : `${_W
 const EF_BASE_URL       = `${SUPABASE_URL}/functions/v1`;
 
 const PAYMOB_LINKS: Record<string, string> = {
-  premium:   "https://accept.paymobsolutions.com/standalone?ref=p_LRR2djFVeWg0SWhkQzY2dnM3WGQxOFl6Zz09X05IeWQra29pd29zUXRTRHF5QkpxMWc9PQ",
-  gold:      "https://accept.paymobsolutions.com/standalone?ref=p_LRR2U0d0ZklEUlIxZUwweWZhUVRGdDVqZz09X1hhTCtGYWhhK1pOSmVyb0pZVFE1dXc9PQ",
+  premium:   "https://accept.paymobsolutions.com/standalone?ref=p_LRR2cnBxcGFGYUdsY1NDVWtNN3RoWlpyUT09X0JLM1lxbFRXQWxVcG1zOWRHVWRYaGc9PQ",
+  gold:      "https://accept.paymobsolutions.com/standalone?ref=p_LRR2cUU0S3F4cGhub3gwSllBL1hiZGpxZz09X2JWM3ZDVlE3Yys1RUdGUGpmUGkzM0E9PQ",
   ai_search: Deno.env.get("PAYMOB_AI_SEARCH_LINK") ?? "",
 };
 
@@ -175,31 +175,54 @@ Deno.serve(async (req) => {
         `&amount=${encodeURIComponent(String(amount ?? ""))}` +
         `&wt=${webhookToken}`;
 
-      const wmRes = await fetch(WISHMONEY_API, {
-        method: "POST",
-        headers: {
-          "channel":      WISHMONEY_CHANNEL,
-          "secret":       WISHMONEY_SECRET,
-          "websiteUrl":   "resumation.co",
-          "Content-Type": "application/json",
-          "User-Agent":   "Whish/1.0 (https://whish.money; support@whish.money)",
-        },
-        body: JSON.stringify({
-          amount:     String(amount),
-          currency:   currency || "USD",
-          invoice:    `Resumation ${plan} plan`,
-          externalId: wmExternalId,
-          // Server-to-server callback: fires on WishMoney confirmation
-          successCallbackUrl: `${baseCallback}&status=success`,
-          failureCallbackUrl: `${baseCallback}&status=failed`,
-          // Browser redirect: also points to the webhook — it mints gid then redirects
-          // the user's browser to /success?gid=<gid>&tid=<tid>
-          successRedirectUrl: `${baseCallback}&status=success`,
-          failureRedirectUrl: "https://resumation.co/plans",
-        }),
-      });
+      // 15-second hard timeout — WishMoney sandbox was hanging 60+ seconds causing 502
+      const wmController = new AbortController();
+      const wmTimeoutId  = setTimeout(() => wmController.abort(), 15_000);
+
+      let wmRes: Response;
+      try {
+        wmRes = await fetch(WISHMONEY_API, {
+          method: "POST",
+          headers: {
+            "channel":      WISHMONEY_CHANNEL,
+            "secret":       WISHMONEY_SECRET,
+            "websiteUrl":   "resumation.co",
+            "Content-Type": "application/json",
+            "User-Agent":   "Whish/1.0 (https://whish.money; support@whish.money)",
+          },
+          body: JSON.stringify({
+            amount:             String(amount),
+            currency:           currency || "USD",
+            invoice:            `Resumation ${plan} plan`,
+            externalId:         wmExternalId,
+            successCallbackUrl: `${baseCallback}&status=success`,
+            failureCallbackUrl: `${baseCallback}&status=failed`,
+            successRedirectUrl: `${baseCallback}&status=success`,
+            failureRedirectUrl: "https://resumation.co/plans",
+          }),
+          signal: wmController.signal,
+        });
+        clearTimeout(wmTimeoutId);
+      } catch (wmErr: unknown) {
+        clearTimeout(wmTimeoutId);
+        const isTimeout = (wmErr as { name?: string })?.name === "AbortError";
+        const msg = isTimeout
+          ? "WishMoney API timed out (15s) — Supabase IP may not be whitelisted on WishMoney sandbox"
+          : `WishMoney fetch error: ${String(wmErr)}`;
+        console.error("create-cv-order WishMoney error:", msg, "| api_url:", WISHMONEY_API);
+        return new Response(
+          JSON.stringify({ error: msg }),
+          { status: 502, headers: { ...cors, "Content-Type": "application/json" } }
+        );
+      }
 
       const wmData    = await wmRes.json().catch(() => ({}));
+
+      // Temporary diagnostic log: shows the full successful WishMoney API response
+      // so we can identify whether WishMoney returns its own invoice/reference number
+      // such as the "Payment To Guest XXXXXXXX" value shown on the hosted page.
+      console.log("WishMoney success response:", JSON.stringify(wmData, null, 2));
+
       const collectUrl: string =
         wmData?.data?.collectUrl ||
         wmData?.collectUrl       ||
@@ -213,7 +236,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      console.error("WishMoney response:", JSON.stringify(wmData));
+      console.error("WishMoney bad response (status", wmRes.status, "):", JSON.stringify(wmData));
       return new Response(
         JSON.stringify({ error: "Failed to create WishMoney order", details: wmData }),
         { status: 502, headers: { ...cors, "Content-Type": "application/json" } }

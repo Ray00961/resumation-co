@@ -23,6 +23,92 @@ interface InvoiceData {
   packageName:    string;  // "premium" | "gold" | "ai_search"
 }
 
+
+function readValidSupabaseAuthFromStorage(): { userId: string; email: string | null; accessToken: string } | null {
+  try {
+    const key = Object.keys(localStorage).find(k => /^sb-.+-auth-token$/.test(k));
+    if (!key) return null;
+
+    console.log("[SuccessPage:localStorage] token found, key:", key);
+
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+
+    let cached: unknown;
+    try {
+      cached = JSON.parse(raw);
+    } catch (_e) {
+      console.warn("[SuccessPage:localStorage] token parse failed — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    if (!cached || typeof cached !== "object") {
+      console.warn("[SuccessPage:localStorage] token not an object — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    const c = cached as Record<string, unknown>;
+    let accessToken: string | null = null;
+    let user: Record<string, unknown> | null = null;
+
+    if (typeof c.access_token === "string" && c.user && typeof c.user === "object") {
+      accessToken = c.access_token;
+      user = c.user as Record<string, unknown>;
+    } else if (c.session && typeof c.session === "object") {
+      const s = c.session as Record<string, unknown>;
+      if (typeof s.access_token === "string" && s.user && typeof s.user === "object") {
+        accessToken = s.access_token;
+        user = s.user as Record<string, unknown>;
+      }
+    }
+
+    if (!accessToken || !user) {
+      console.warn("[SuccessPage:localStorage] token shape unrecognized — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    try {
+      const parts = accessToken.split(".");
+      if (parts.length !== 3) throw new Error("not a JWT");
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+      const exp = typeof payload.exp === "number" ? payload.exp : null;
+      const nowSecs = Math.floor(Date.now() / 1000);
+
+      if (!exp || exp - nowSecs < 60) {
+        console.warn("[SuccessPage:localStorage] token expired or expires within 60s — removing key", {
+          exp,
+          nowSecs,
+          diff: exp ? exp - nowSecs : null,
+        });
+        localStorage.removeItem(key);
+        return null;
+      }
+    } catch (_e) {
+      console.warn("[SuccessPage:localStorage] JWT decode failed — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    const userId = typeof user.id === "string" ? user.id : null;
+    const email = typeof user.email === "string" ? user.email : null;
+
+    if (!userId) {
+      console.warn("[SuccessPage:localStorage] token missing user.id — removing key");
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    console.log("[SuccessPage:localStorage] token valid:", { userId, email });
+    return { userId, email, accessToken };
+  } catch (err) {
+    console.warn("[SuccessPage:localStorage] unexpected error reading token:", err);
+    return null;
+  }
+}
+
 export default function SuccessPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -59,16 +145,56 @@ export default function SuccessPage() {
       const safetyTimeout = setTimeout(() => setPageLoading(false), 5000);
 
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user) {
+        let authUserId = "";
+        let authEmail = "";
+        let authToken = "";
+
+        console.log("[SuccessPage:init] start auth resolution");
+
+        const localAuth = readValidSupabaseAuthFromStorage();
+        if (localAuth) {
+          console.log("[SuccessPage:init] using local token path");
+          authUserId = localAuth.userId;
+          authEmail = localAuth.email || "";
+          authToken = localAuth.accessToken;
+        }
+
+        if (!authUserId || !authToken) {
+          console.log("[SuccessPage:init] fallback to getSession");
+
+          const sessionResult = await Promise.race([
+            supabase.auth.getSession(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+          ]);
+
+          if (!sessionResult) {
+            console.warn("[SuccessPage:init] getSession timed out after 10s");
+          }
+
+          const session = sessionResult?.data?.session ?? null;
+          console.log("[SuccessPage:init] getSession result:", {
+            hasSession: !!session,
+            userId: session?.user?.id ?? null,
+            email: session?.user?.email ?? null,
+            hasAccessToken: !!session?.access_token,
+          });
+
+          if (session?.user && session.access_token) {
+            authUserId = session.user.id;
+            authEmail = session.user.email || "";
+            authToken = session.access_token;
+          }
+        }
+
+        if (!authUserId || !authToken) {
           clearTimeout(safetyTimeout);
           navigate("/login");
           return;
         }
 
-        tokenRef.current  = session.access_token;
-        userIdRef.current = session.user.id;
-        setCurrentUser({ id: session.user.id, email: session.user.email || "" });
+        tokenRef.current  = authToken;
+        userIdRef.current = authUserId;
+        setCurrentUser({ id: authUserId, email: authEmail });
 
         const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
         let resolvedGid = "";
@@ -98,7 +224,7 @@ export default function SuccessPage() {
           const { data: existingRow } = await supabase
             .from("order_generations")
             .select("generation_id, submission_id, package_name")
-            .eq("user_id", session.user.id)
+            .eq("user_id", authUserId)
             .order("created_at_utc", { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -115,7 +241,7 @@ export default function SuccessPage() {
               method:  "POST",
               headers: {
                 "Content-Type":  "application/json",
-                "Authorization": `Bearer ${session.access_token}`,
+                "Authorization": `Bearer ${authToken}`,
               },
               body: JSON.stringify({
                 generation_id:   existingRow.generation_id,
@@ -134,7 +260,7 @@ export default function SuccessPage() {
                 method:  "POST",
                 headers: {
                   "Content-Type":  "application/json",
-                  "Authorization": `Bearer ${session.access_token}`,
+                  "Authorization": `Bearer ${authToken}`,
                 },
                 body: JSON.stringify({
                   paymob_order_id: paymobOrderId,
