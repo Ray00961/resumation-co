@@ -57,8 +57,24 @@ export default function PlansPage() {
         let uid: string | null = null;
         let email: string | null = null;
 
-        // FIX: Always call getSession() first to properly initialize Supabase auth state
-        const { data: { session } } = await supabase.auth.getSession();
+        console.log("[PlansPage:init] start auth resolution");
+
+        const sessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+        ]);
+
+        if (!sessionResult) {
+          console.warn("[PlansPage:init] getSession timed out after 10s");
+        }
+
+        const session = sessionResult?.data?.session ?? null;
+        console.log("[PlansPage:init] getSession result:", {
+          hasSession: !!session,
+          userId: session?.user?.id ?? null,
+          email: session?.user?.email ?? null,
+        });
+
         if (session?.user) {
           uid   = session.user.id;
           email = session.user.email ?? null;
@@ -67,7 +83,24 @@ export default function PlansPage() {
         // Fallback: getUser() forces a server round-trip and handles token refresh.
         // Never read uid from localStorage — it may be stale.
         if (!uid) {
-          const { data: { user } } = await supabase.auth.getUser();
+          console.log("[PlansPage:init] start getUser fallback");
+
+          const userResult = await Promise.race([
+            supabase.auth.getUser(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+          ]);
+
+          if (!userResult) {
+            console.warn("[PlansPage:init] getUser timed out after 10s");
+          }
+
+          const user = userResult?.data?.user ?? null;
+          console.log("[PlansPage:init] getUser result:", {
+            hasUser: !!user,
+            userId: user?.id ?? null,
+            email: user?.email ?? null,
+          });
+
           if (user) {
             uid   = user.id;
             email = user.email ?? null;
@@ -137,6 +170,19 @@ export default function PlansPage() {
 
   // ── Payment handler (premium / gold / ai_search) ──
   const handlePaidPlan = async (plan: "premium" | "gold" | "ai_search") => {
+    console.log("[handlePaidPlan] 1. ENTER handlePaidPlan");
+    console.log("[handlePaidPlan] 2. selected plan:", plan);
+    console.log("[handlePaidPlan] current state snapshot:", {
+      userId,
+      userEmail,
+      userName,
+      formId,
+      submissionId,
+      userRegion,
+      isEgypt,
+      hasReferral,
+    });
+
     setLoading(plan);
     setPayError(null);
 
@@ -144,17 +190,43 @@ export default function PlansPage() {
       // Always resolve uid and access_token from a live session.
       // Never read from stale React state or localStorage — either may be from
       // before the bailout fired or may carry an expired token.
-      const { data: { session: liveSession } } = await supabase.auth.getSession();
+      console.log("[handlePaidPlan] 3. start getSession()");
+
+      const liveSessionResult = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+      ]);
+
+      if (!liveSessionResult) {
+        console.warn("[handlePaidPlan] RETURN: getSession timed out after 10s");
+        setPayError("Session check timed out — please reload the page.");
+        setLoading(null);
+        return;
+      }
+
+      const liveSession = liveSessionResult.data.session;
+      console.log("[handlePaidPlan] 4. getSession() result:", {
+        hasSession: !!liveSession,
+        userId: liveSession?.user?.id ?? null,
+        email: liveSession?.user?.email ?? null,
+        hasAccessToken: !!liveSession?.access_token,
+      });
+
       const liveUid         = liveSession?.user?.id   ?? userId ?? null;
       const liveAccessToken = liveSession?.access_token          ?? null;
 
+      console.log("[handlePaidPlan] 5. liveUid:", liveUid);
+      console.log("[handlePaidPlan] 6. liveAccessToken exists:", !!liveAccessToken);
+
       if (!liveUid) {
+        console.log("[handlePaidPlan] RETURN: no liveUid — session error");
         setPayError("Session error — please refresh the page.");
         setLoading(null);
         return;
       }
 
       if (!liveAccessToken) {
+        console.log("[handlePaidPlan] RETURN: no liveAccessToken — session expired");
         setPayError("Session expired — please reload the page.");
         setLoading(null);
         return;
@@ -167,6 +239,8 @@ export default function PlansPage() {
       let safeSid    = submissionId || "";
 
       if (!safeFormId) {
+        console.log("[handlePaidPlan] 7. safeFormId empty — start cv_archive lookup", { safeSid, liveUid });
+
         const timeout10s = new Promise<{ data: null }>((resolve) =>
           setTimeout(() => resolve({ data: null }), 10_000)
         );
@@ -184,6 +258,7 @@ export default function PlansPage() {
             .maybeSingle();
 
           const result = await Promise.race([bySid, timeout10s]);
+          console.log("[handlePaidPlan] 8a. cv_archive lookup by submission_id result:", result?.data ?? null);
           data = result?.data ?? null;
         }
 
@@ -198,6 +273,7 @@ export default function PlansPage() {
               .maybeSingle(),
             timeout10s,
           ]);
+          console.log("[handlePaidPlan] 8b. cv_archive latest lookup result:", latest?.data ?? null);
           data = latest?.data ?? null;
         }
 
@@ -207,10 +283,13 @@ export default function PlansPage() {
           setFormId(safeFormId);
           setSubmissionId(safeSid);
         } else {
+          console.log("[handlePaidPlan] RETURN: cv_archive row not found");
           setPayError("System Error: CV data not found. Please try again.");
           setLoading(null);
           return;
         }
+      } else {
+        console.log("[handlePaidPlan] 7. form lookup skipped — safeFormId already set:", safeFormId);
       }
 
       const EF_URL = (import.meta.env.VITE_EF_CREATE_CV_ORDER as string) ||
@@ -242,6 +321,16 @@ export default function PlansPage() {
         "Authorization": `Bearer ${liveAccessToken}`,
       };
 
+      console.log("[handlePaidPlan] 9. start create-cv-order request", {
+        url: EF_URL,
+        form_id: safeFormId,
+        submission_id: safeSid,
+        plan,
+        amount: amt,
+        currency: cur,
+        payment_method: isEgypt ? "paymob" : "whish",
+      });
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); 
 
@@ -257,7 +346,14 @@ export default function PlansPage() {
 
         const result = await res.json().catch(() => ({}));
 
+        console.log("[handlePaidPlan] 10. create-cv-order response", {
+          status: res.status,
+          ok: res.ok,
+          body: result,
+        });
+
         if (!res.ok || result?.error) {
+           console.log("[handlePaidPlan] RETURN: gateway error response");
            setPayError(result?.error || result?.message || "Payment gateway error — please try again.");
            setLoading(null);
            return;
@@ -272,6 +368,7 @@ export default function PlansPage() {
 
           const baseLink = result?.url || linkMap[plan];
           if (!baseLink) {
+            console.log("[handlePaidPlan] RETURN: no Paymob link for plan:", plan);
             setPayError("Payment link not available — please try again.");
             setLoading(null);
             return;
@@ -282,6 +379,7 @@ export default function PlansPage() {
 
           sessionStorage.setItem("rsm_plan", plan);
 
+          console.log("[handlePaidPlan] RETURN: redirecting to Paymob", { cid });
           window.location.assign(
             baseLink
             + `&billing_data[first_name]=${encodeURIComponent(safeName)}`
@@ -297,9 +395,11 @@ export default function PlansPage() {
           if (url) {
             let final = url.trim();
             if (!final.startsWith("http")) final = `https://${final}`;
+            console.log("[handlePaidPlan] RETURN: redirecting to WishMoney", { url: final });
             window.location.assign(final);
           } else {
             console.error("WishMoney no url:", result);
+            console.log("[handlePaidPlan] RETURN: no WishMoney url in response");
             setPayError(`Invalid gateway response. Please try again.`);
             setLoading(null);
           }
@@ -307,6 +407,7 @@ export default function PlansPage() {
       } catch (fetchErr: unknown) {
         clearTimeout(timeoutId);
         const e = fetchErr as { name?: string; message?: string };
+        console.error("[handlePaidPlan] 11. CATCH fetchErr", e);
         if (e?.name === "AbortError" || e?.name === "TimeoutError") {
            setPayError("Payment gateway timed out. The Edge Function took too long to respond.");
         } else {
@@ -315,6 +416,7 @@ export default function PlansPage() {
         setLoading(null);
       }
     } catch (err: unknown) {
+      console.error("[handlePaidPlan] 12. CATCH outer", err);
       console.warn("Unexpected Payment error:", err);
       setPayError("An unexpected error occurred — please try again.");
       setLoading(null);
