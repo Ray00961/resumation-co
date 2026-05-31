@@ -241,30 +241,58 @@ export default function BuildingPage() {
     if (isFree) return;
     if (!gid)   { navigate("/my-account?view=downloads"); return; }
 
-    console.log("[BuildingPage] effect start", { gid, isFree });
-    
     let cancelled = false;
 
     cursorTimerRef.current = setInterval(() => setCursorOn(p => !p), CURSOR_BLINK);
     typeTimerRef.current   = setTimeout(scheduleNextChar, 300);
 
     const checkReady = async () => {
+      console.log("[BuildingPage] checkReady called");
+
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+      const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+      const lsKey = Object.keys(localStorage).find(
+        k => k.startsWith("sb-") && k.endsWith("-auth-token")
+      );
+
+      let token: string | null = null;
+      if (lsKey) {
+        try {
+          token = JSON.parse(localStorage.getItem(lsKey) || "null")?.access_token ?? null;
+        } catch {}
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       try {
-        console.log("[BuildingPage] checkReady called");
         console.log("[BuildingPage] querying order_generations", gid);
 
-        const { data, error } = await supabase
-          .from("order_generations")
-          .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
-          .eq("generation_id", gid)
-          .maybeSingle();
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/order_generations?generation_id=eq.${gid}&select=cv_pdf_url,cv_file_path,cl_pdf_url,cl_file_path`,
+          {
+            signal: controller.signal,
+            headers: {
+              "apikey": SUPABASE_KEY,
+              "Authorization": `Bearer ${token ?? SUPABASE_KEY}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
 
-        console.log("[BuildingPage] result", { data, error });
+        clearTimeout(timeoutId);
 
-        if (error) {
-          console.error("[BuildingPage]", error);
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          console.error("[BuildingPage] REST error", res.status, body);
           return;
         }
+
+        const json = await res.json();
+        const data = Array.isArray(json) ? json[0] : null;
+
+        console.log("[BuildingPage] result", data);
 
         if (cancelled) return;
 
@@ -274,7 +302,8 @@ export default function BuildingPage() {
         if (cvReady) {
           markComplete(cvReady, clReady ?? undefined);
         }
-      } catch (err) {
+      } catch (err: unknown) {
+        clearTimeout(timeoutId);
         console.error("[BuildingPage] checkReady crashed", err);
       }
     };
