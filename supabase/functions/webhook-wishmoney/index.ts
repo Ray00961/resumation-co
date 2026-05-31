@@ -390,6 +390,56 @@ Deno.serve(async (req) => {
       .single();
 
     if (insertErr || !newRow) {
+      const insertCode = (insertErr as any)?.code ?? "";
+      const insertMsg = String((insertErr as any)?.message ?? insertErr ?? "");
+      const isDuplicateWishMoneyOrder =
+        insertCode === "23505" || insertMsg.toLowerCase().includes("duplicate key");
+
+      // Race-condition safety:
+      // WishMoney can hit this function twice for the same tid:
+      // 1) server-side POST callback
+      // 2) browser GET redirect
+      // If both arrive at the same time, a DB unique constraint on wishmoney_order_id
+      // lets only one INSERT win. The loser lands here, then re-reads the winning row
+      // and redirects/returns the same generation_id instead of creating a duplicate.
+      if (isDuplicateWishMoneyOrder) {
+        const { data: raceExisting, error: raceErr } = await db
+          .from("order_generations")
+          .select("generation_id, payment_method")
+          .eq("wishmoney_order_id", tid)
+          .maybeSingle();
+
+        if (!raceErr && raceExisting?.generation_id) {
+          console.log("webhook-wishmoney: duplicate insert blocked, using existing row", {
+            tid,
+            generation_id: raceExisting.generation_id,
+          });
+
+          if (req.method === "GET") {
+            return new Response(null, {
+              status: 302,
+              headers: {
+                Location: `https://resumation.co/success?gid=${raceExisting.generation_id}&tid=${tid}&plan=${plan}`,
+              },
+            });
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              generation_id: raceExisting.generation_id,
+              note: "already processed",
+            }),
+            { headers: { ...cors, "Content-Type": "application/json" } },
+          );
+        }
+
+        console.error("webhook-wishmoney: duplicate insert detected but existing row lookup failed", {
+          tid,
+          raceErr,
+        });
+      }
+
       console.error("webhook-wishmoney: INSERT into order_generations failed", insertErr);
 
       return new Response(
@@ -458,4 +508,4 @@ Deno.serve(async (req) => {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   }
-});npm -v
+});
