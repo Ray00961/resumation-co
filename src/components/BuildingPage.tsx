@@ -87,6 +87,7 @@ export default function BuildingPage() {
   const channelRef     = useRef<RealtimeChannel | null>(null);
   const pollRef        = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef     = useRef<ReturnType<typeof setTimeout>  | null>(null);
+  const typewriterBoxRef = useRef<HTMLDivElement | null>(null);
   const bottomRef      = useRef<HTMLDivElement | null>(null);
 
   // ── Mark paid-plan complete ───────────────────────────────────────────────
@@ -94,11 +95,18 @@ export default function BuildingPage() {
     setCvUrl(url);
     if (cl) setClUrl(cl);
     setIsComplete(true);
-    if (pollRef.current)       clearInterval(pollRef.current);
-    if (timeoutRef.current)    clearTimeout(timeoutRef.current);
-    if (channelRef.current)    supabase.removeChannel(channelRef.current);
-    if (typeTimerRef.current)  clearTimeout(typeTimerRef.current);
+    if (pollRef.current)        clearInterval(pollRef.current);
+    if (timeoutRef.current)     clearTimeout(timeoutRef.current);
+    if (channelRef.current)     supabase.removeChannel(channelRef.current);
+    if (typeTimerRef.current)   clearTimeout(typeTimerRef.current);
     if (cursorTimerRef.current) clearInterval(cursorTimerRef.current);
+
+    // The generate-cv function updates order_generations, then the user
+    // should land in the Downloads view. Keep the success state briefly so
+    // the user sees completion, then move them to the archive.
+    window.setTimeout(() => {
+      navigate("/my-account?view=downloads");
+    }, 2000);
   };
 
   // ── Typewriter (paid plan only) ───────────────────────────────────────────
@@ -135,7 +143,10 @@ export default function BuildingPage() {
   };
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Keep the animation scrolled inside its own terminal box.
+    // Avoid scrollIntoView here because it can make the whole page jump upward.
+    const el = typewriterBoxRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [visibleLines, currentTyping]);
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -143,7 +154,7 @@ export default function BuildingPage() {
   // ══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (!isFree) return;
-    if (!fid) { navigate("/account?view=downloads"); return; }
+    if (!fid) { navigate("/my-account?view=downloads"); return; }
 
     phraseTimerRef.current = setInterval(() => {
       setPhraseVisible(false);
@@ -229,7 +240,7 @@ export default function BuildingPage() {
   // ══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (isFree) return;
-    if (!gid)   { navigate("/account?view=downloads"); return; }
+    if (!gid)   { navigate("/my-account?view=downloads"); return; }
 
     cursorTimerRef.current = setInterval(() => setCursorOn(p => !p), CURSOR_BLINK);
     typeTimerRef.current   = setTimeout(scheduleNextChar, 300);
@@ -238,11 +249,13 @@ export default function BuildingPage() {
       try {
         const { data } = await supabase
           .from("order_generations")
-          .select("cv_pdf_url, cl_pdf_url")
+          .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
           .eq("generation_id", gid)
           .single();
-        if (data?.cv_pdf_url) {
-          markComplete(data.cv_pdf_url, data.cl_pdf_url ?? undefined);
+        const cvReady = data?.cv_pdf_url || data?.cv_file_path;
+        const clReady = data?.cl_pdf_url || data?.cl_file_path;
+        if (cvReady) {
+          markComplete(cvReady, clReady ?? undefined);
           return true;
         }
       } catch {}
@@ -263,8 +276,10 @@ export default function BuildingPage() {
           table:  "order_generations",
           filter: `generation_id=eq.${gid}`,
         }, (payload: any) => {
-          if (payload.new?.cv_pdf_url) {
-            markComplete(payload.new.cv_pdf_url, payload.new.cl_pdf_url ?? undefined);
+          const cvReady = payload.new?.cv_pdf_url || payload.new?.cv_file_path;
+          const clReady = payload.new?.cl_pdf_url || payload.new?.cl_file_path;
+          if (cvReady) {
+            markComplete(cvReady, clReady ?? undefined);
           }
         })
         .subscribe();
@@ -275,11 +290,13 @@ export default function BuildingPage() {
           try {
             const { data } = await supabase
               .from("order_generations")
-              .select("cv_pdf_url, cl_pdf_url")
+              .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
               .eq("generation_id", gid)
               .single();
-            if (data?.cv_pdf_url) {
-              markComplete(data.cv_pdf_url, data.cl_pdf_url ?? undefined);
+            const cvReady = data?.cv_pdf_url || data?.cv_file_path;
+            const clReady = data?.cl_pdf_url || data?.cl_file_path;
+            if (cvReady) {
+              markComplete(cvReady, clReady ?? undefined);
             }
           } catch {}
         }, 6000);
@@ -455,7 +472,7 @@ export default function BuildingPage() {
                     }
                   </button>
                   <button
-                    onClick={() => navigate("/account?view=downloads")}
+                    onClick={() => navigate("/my-account?view=downloads")}
                     className="flex-1 py-3 rounded-2xl font-black text-xs uppercase tracking-widest border border-white/10 text-[#7A8FAA] hover:text-white hover:border-white/20 transition-all flex items-center justify-center gap-2"
                   >
                     <FileText className="w-3 h-3" /> View All Downloads
@@ -544,7 +561,7 @@ export default function BuildingPage() {
               <div className="w-2.5 h-2.5 rounded-full bg-[#28C840]" />
               <span className="ml-3 text-[10px] text-[#7A8FAA] font-mono">resumation-ai · generating report...</span>
             </div>
-            <div className="p-5 h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent font-mono">
+            <div ref={typewriterBoxRef} className="p-5 h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-white/5 scrollbar-track-transparent font-mono">
               {visibleLines.map((line, idx) => renderLine(line, idx))}
               {renderTypingLine()}
               <div ref={bottomRef} />
@@ -583,7 +600,7 @@ export default function BuildingPage() {
             </a>
 
             <button
-              onClick={() => navigate("/account?view=downloads")}
+              onClick={() => navigate("/my-account?view=downloads")}
               className="w-full py-3 rounded-2xl font-black text-xs uppercase tracking-widest border border-white/10 text-[#7A8FAA] hover:text-white hover:border-white/20 transition-all flex items-center justify-center gap-2"
             >
               <FileText className="w-3 h-3" /> View All Downloads
@@ -595,7 +612,7 @@ export default function BuildingPage() {
           <div className="mt-4 p-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 text-center">
             <p className="text-amber-400 text-xs font-bold mb-2">Still processing — taking longer than usual.</p>
             <button
-              onClick={() => navigate("/account?view=downloads")}
+              onClick={() => navigate("/my-account?view=downloads")}
               className="text-[11px] text-amber-400/70 underline hover:text-amber-400 transition-colors"
             >
               Check My Downloads

@@ -154,6 +154,7 @@ export default function MyAccount() {
   const t = TRANSLATIONS[lang];
 
   const [archive, setArchive]         = useState<ArchiveItem[]>([]);
+  const [downloads, setDownloads]     = useState<ArchiveItem[]>([]);
   const [loading, setLoading]         = useState(true);
   const [userName, setUserName]       = useState("USER");
   const [userId, setUserId]           = useState<string>("");
@@ -236,7 +237,43 @@ export default function MyAccount() {
       }
     };
 
+    const normalizeDownloadRows = (rows: any[]): ArchiveItem[] => {
+      return rows.map((row: any) => ({
+        ...row,
+        form_id: row.form_id || row.generation_id,
+        created_at_utc: row.created_at_utc || row.created_at || "",
+        cv_pdf_url: row.cv_pdf_url ?? null,
+        cv_file_path: row.cv_file_path ?? null,
+        cl_pdf_url: row.cl_pdf_url ?? null,
+        cl_file_path: row.cl_file_path ?? null,
+        cv_first_name: row.cv_first_name ?? row.first_name ?? row.username,
+        cv_last_name: row.cv_last_name ?? row.last_name ?? "",
+        username: row.username ?? row.email ?? userName,
+        package_name: row.package_name ?? row.plan ?? "",
+        submission_id: row.submission_id ?? null,
+        computedType: "cv",
+      }));
+    };
+
+    // ── 2a. Downloads must come directly from generated order rows ──
+    // This prevents raw cv_archive submissions from appearing before payment/generation.
+    const fetchDownloads = async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/order_generations?user_id=eq.${uid}` +
+          `&order=created_at_utc.desc` +
+          `&select=*`,
+          { headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader } }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) setDownloads(normalizeDownloadRows(data));
+        }
+      } catch {}
+    };
+
     fetchArchives();
+    fetchDownloads();
 
     // ── 2b. Fetch coin economy data from users table ──
     const fetchUserCoins = async () => {
@@ -264,7 +301,7 @@ export default function MyAccount() {
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "cv_archive", filter: `user_id=eq.${uid}` },
-        () => { fetchArchives(); }
+        () => { fetchArchives(); fetchDownloads(); }
       )
       .on(
         "postgres_changes",
@@ -274,6 +311,7 @@ export default function MyAccount() {
             toast.success(t.documentReady, { description: t.documentReadyDesc, icon: "🚀" });
           }
           fetchArchives();
+          fetchDownloads();
         }
       )
       .subscribe();
@@ -578,7 +616,7 @@ export default function MyAccount() {
     !!(item.cv_pdf_url || item.cv_file_path || item.cl_pdf_url || item.cl_file_path);
 
   // Downloads view must show generated/paid bundles only — not raw cv_archive form submissions.
-  const downloadableArchive = archive.filter(hasGeneratedDocs);
+  const downloadableArchive = downloads.filter(hasGeneratedDocs);
 
 
   if (loading) return (
@@ -819,7 +857,7 @@ export default function MyAccount() {
                         const isUpgrading   = upgradingId   === item.form_id;
                         const isFreeRow     = (item.package_name || 'free').toLowerCase() === 'free';
                         return (
-                          <tr key={item.form_id} className="hover:bg-white/5 transition-all duration-300">
+                          <tr key={item.generation_id || item.form_id} className="hover:bg-white/5 transition-all duration-300">
                             <td className="px-6 py-5">
                               <div className="flex flex-col gap-1">
                                 <span className="text-sm font-black text-white">{formatDate(item.created_at_utc || item.created_at)}</span>
