@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import HTMLtoDOCX from "npm:html-to-docx@1.8.0";
 
 const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -939,6 +940,102 @@ function extractDiv(raw: string): string {
   return raw;
 }
 
+// ── Helper: safe filenames for generated DOCX files ──────────────────────────
+function safeFilePart(value: unknown, fallback: string): string {
+  const raw = String(value ?? "").trim();
+  const cleaned = raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+
+  return cleaned || fallback;
+}
+
+function getDisplayName(cvData: any, record: any): string {
+  const fromRecord =
+    record.username ||
+    [record.cv_first_name, record.cv_last_name].filter(Boolean).join(" ");
+
+  const fromCvData =
+    cvData?.fullName ||
+    cvData?.full_name ||
+    [cvData?.firstName, cvData?.lastName].filter(Boolean).join(" ") ||
+    [cvData?.first_name, cvData?.last_name].filter(Boolean).join(" ") ||
+    cvData?.name;
+
+  return fromRecord || fromCvData || "user";
+}
+
+function normalizeHtmlForDocx(innerHtml: string): string {
+  return String(innerHtml || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*>/gi, "<br />")
+    .replace(/<hr\s*>/gi, "<hr />")
+    .replace(/&(?!amp;|lt;|gt;|quot;|apos;|nbsp;|#\d+;|#x[0-9a-fA-F]+;)/g, "&amp;")
+    .trim();
+}
+
+function wrapHtmlForDocx(innerHtml: string, lang: string): string {
+  const isArabic = lang === "ar";
+  const safeInnerHtml = normalizeHtmlForDocx(innerHtml);
+
+  return `<!DOCTYPE html>
+<html ${isArabic ? 'dir="rtl" lang="ar"' : 'lang="en"'}>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body {
+      font-family: Calibri, Arial, sans-serif;
+      color: #000000;
+      ${isArabic ? "direction: rtl; text-align: right;" : ""}
+    }
+  </style>
+</head>
+<body>
+${safeInnerHtml}
+</body>
+</html>`;
+}
+
+async function htmlToDocxBytes(innerHtml: string, lang: string, label: string): Promise<Uint8Array> {
+  const startedAt = Date.now();
+  console.log(`[generate-cv] ${label}: DOCX conversion START`);
+
+  const fullHtml = wrapHtmlForDocx(innerHtml, lang);
+
+  const result = await HTMLtoDOCX(fullHtml, undefined, {
+    table: { row: { cantSplit: true } },
+    footer: false,
+    pageNumber: false,
+  });
+
+  let bytes: Uint8Array;
+
+  if (result instanceof Uint8Array) {
+    bytes = result;
+  } else if (result instanceof ArrayBuffer) {
+    bytes = new Uint8Array(result);
+  } else if (typeof Blob !== "undefined" && result instanceof Blob) {
+    bytes = new Uint8Array(await result.arrayBuffer());
+  } else {
+    // html-to-docx usually returns a Node Buffer, which is a Uint8Array.
+    bytes = new Uint8Array(result as ArrayBufferLike);
+  }
+
+  console.log(
+    `[generate-cv] ${label}: DOCX conversion OK bytes=${bytes.byteLength} ms=${Date.now() - startedAt}`
+  );
+
+  if (!bytes.byteLength) {
+    throw new Error(`${label} DOCX conversion returned empty file`);
+  }
+
+  return bytes;
+}
+
+
 // ── PAID PLAN: Generate CV HTML ───────────────────────────────────────────────
 async function generateCvHtml(cvData: any, plan: string, lang: string): Promise<string> {
   const cvDataJson   = JSON.stringify(cvData, null, 2);
@@ -1100,8 +1197,6 @@ Deno.serve(async (req) => {
       ` lang=${lang} uid=${uid} tid=${transaction_id ?? "n/a"}`
     );
 
-    const encoder = new TextEncoder();
-
     // ── Generate CV + Cover Letter concurrently ────────────────────────────
     const [cvHtml, clHtml] = await Promise.all([
       generateCvHtml(cvData, effectivePlan, lang),
@@ -1125,36 +1220,62 @@ Deno.serve(async (req) => {
     }
     console.log("[generate-cv] cv_gpt_result saved for gid:", generation_id);
 
-    // ── STEP D: Upload to storage — isolated path per generation_id ────────
-    // {user_id}/{generation_id}_cv_{lang}.html guarantees that even if the same
-    // user pays multiple times, files from different sessions never collide.
-    const cvFilePath = `${uid}/${generation_id}_cv_${lang}.html`;
-    const clFilePath = `${uid}/${generation_id}_cl_${lang}.html`;
+    // ── STEP D: Convert HTML → real editable DOCX files ─────────────────────
+    // IMPORTANT: Do NOT convert both files in Promise.all. html-to-docx can be
+    // memory/CPU heavy inside Supabase Edge Runtime. Running both conversions
+    // at the same time can leave the function hanging until the runtime shuts
+    // it down. Sequential conversion keeps the Premium Bundle intact and gives
+    // exact logs for CV vs Cover Letter.
+    const safeUser = safeFilePart(getDisplayName(cvData, record), "user");
+    const safeSubmission = safeFilePart(record.submission_id || generation_id, "submission");
 
-    const [cvUpload, clUpload] = await Promise.all([
-      db.storage.from("cv-documents").upload(cvFilePath, encoder.encode(cvHtml), {
-        contentType: "application/octet-stream",
-        upsert: true,
-      }),
-      db.storage.from("cv-documents").upload(clFilePath, encoder.encode(clHtml), {
-        contentType: "application/octet-stream",
-        upsert: true,
-      }),
-    ]);
+    const cvFileName = `${safeUser}_${safeSubmission}_CV_${lang}.docx`;
+    const clFileName = `${safeUser}_${safeSubmission}_Cover_Letter_${lang}.docx`;
 
+    // Isolated path per generation keeps repeated purchases from colliding.
+    const cvFilePath = `${uid}/${generation_id}/${cvFileName}`;
+    const clFilePath = `${uid}/${generation_id}/${clFileName}`;
+
+    const docxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+    const cvDocxBytes = await htmlToDocxBytes(cvHtml, lang, "CV");
+    const clDocxBytes = await htmlToDocxBytes(clHtml, lang, "Cover Letter");
+
+    console.log("[generate-cv] CV: upload START", cvFilePath);
+    const cvUpload = await db.storage.from("cv-documents").upload(cvFilePath, cvDocxBytes, {
+      contentType: docxMime,
+      upsert: true,
+    });
     if (cvUpload.error) throw new Error(`CV upload failed: ${cvUpload.error.message}`);
-    if (clUpload.error) throw new Error(`CL upload failed: ${clUpload.error.message}`);
+    console.log("[generate-cv] CV: upload OK", cvFilePath);
 
+    console.log("[generate-cv] Cover Letter: upload START", clFilePath);
+    const clUpload = await db.storage.from("cv-documents").upload(clFilePath, clDocxBytes, {
+      contentType: docxMime,
+      upsert: true,
+    });
+    if (clUpload.error) throw new Error(`CL upload failed: ${clUpload.error.message}`);
+    console.log("[generate-cv] Cover Letter: upload OK", clFilePath);
+
+    console.log("[generate-cv] signed URLs START");
     const [cvSigned, clSigned] = await Promise.all([
       db.storage.from("cv-documents").createSignedUrl(cvFilePath, 60 * 60 * 24 * 90),
       db.storage.from("cv-documents").createSignedUrl(clFilePath, 60 * 60 * 24 * 90),
     ]);
 
+    if (cvSigned.error) throw new Error(`CV signed URL failed: ${cvSigned.error.message}`);
+    if (clSigned.error) throw new Error(`CL signed URL failed: ${clSigned.error.message}`);
+
     const cvFileUrl = cvSigned.data?.signedUrl ?? "";
     const clFileUrl = clSigned.data?.signedUrl ?? "";
+    console.log("[generate-cv] signed URLs OK", {
+      hasCvUrl: !!cvFileUrl,
+      hasClUrl: !!clFileUrl,
+    });
 
     // Write file paths and signed URLs back to the exact row.
     // BuildingPage's Realtime subscription fires on this UPDATE, completing the UI.
+    console.log("[generate-cv] final DB update START");
     const { error: updateErr } = await db
       .from("order_generations")
       .update({
@@ -1169,6 +1290,12 @@ Deno.serve(async (req) => {
       console.error("[generate-cv] final URL write failed:", updateErr);
       // cv_gpt_result already safe — log but don't throw so the response still returns URLs
       console.warn("[generate-cv] Files uploaded but paths not written to DB");
+    } else {
+      console.log("[generate-cv] final DB update OK", {
+        generation_id,
+        cvFilePath,
+        clFilePath,
+      });
     }
 
     return new Response(
