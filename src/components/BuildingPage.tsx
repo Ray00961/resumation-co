@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "../supabase";
-import { Download, FileText, Sparkles, ExternalLink, Loader2 } from "lucide-react";
+import { Download, FileText, Sparkles, ExternalLink, Loader2, BrainCircuit, Zap } from "lucide-react";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
 // ── 7 loading phrases for free plan (2.5 s each) ─────────────────────────────
@@ -626,6 +626,23 @@ export default function BuildingPage() {
               className="w-full py-3 rounded-2xl font-black text-xs uppercase tracking-widest border border-white/10 text-[#7A8FAA] hover:text-white hover:border-white/20 transition-all flex items-center justify-center gap-2"
             >
               <FileText className="w-3 h-3" /> View All Downloads
+            </button>
+
+            <button
+              onClick={() => navigate("/analyse")}
+              className="w-full bg-[rgba(224,197,143,0.10)] border border-[rgba(224,197,143,0.30)] text-[#E0C58F] hover:bg-[#E0C58F] hover:text-[#0D1117] px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all inline-flex items-center justify-center gap-1.5 shadow-[0_0_12px_rgba(224,197,143,0.10)]"
+            >
+              <BrainCircuit className="w-3 h-3" /> Analyze CV
+            </button>
+
+            <button
+              disabled
+              title="Coming Soon"
+              className="w-full relative opacity-60 cursor-not-allowed bg-[rgba(139,92,246,0.10)] border border-[rgba(139,92,246,0.30)] text-violet-400 px-4 py-2 rounded-xl font-black text-[11px] uppercase tracking-widest inline-flex items-center justify-center gap-1.5"
+            >
+              <Zap className="w-3 h-3" />
+              AI Job Hunter
+              <span className="ml-1 text-[8px] bg-violet-500/20 text-violet-300 border border-violet-500/30 px-1.5 py-0.5 rounded-full font-black tracking-widest">SOON</span>
             </button>
           </div>
         )}
