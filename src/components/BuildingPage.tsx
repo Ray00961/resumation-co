@@ -249,22 +249,33 @@ export default function BuildingPage() {
     typeTimerRef.current   = setTimeout(scheduleNextChar, 300);
 
     const checkReady = async () => {
-      console.log("[BuildingPage] checkReady called");
-      
-      const { data, error } = await supabase
-        .from("order_generations")
-        .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
-        .eq("generation_id", gid)
-        .maybeSingle();
-      if (error) {
-        console.error("[BuildingPage]", error);
-        return;
-      }
-      if (cancelled) return;
-      const cvReady = data?.cv_pdf_url || data?.cv_file_path;
-      const clReady = data?.cl_pdf_url || data?.cl_file_path;
-      if (cvReady) {
-        markComplete(cvReady, clReady ?? undefined);
+      try {
+        console.log("[BuildingPage] checkReady called");
+        console.log("[BuildingPage] querying order_generations", gid);
+
+        const { data, error } = await supabase
+          .from("order_generations")
+          .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
+          .eq("generation_id", gid)
+          .maybeSingle();
+
+        console.log("[BuildingPage] result", { data, error });
+
+        if (error) {
+          console.error("[BuildingPage]", error);
+          return;
+        }
+
+        if (cancelled) return;
+
+        const cvReady = data?.cv_pdf_url || data?.cv_file_path;
+        const clReady = data?.cl_pdf_url || data?.cl_file_path;
+
+        if (cvReady) {
+          markComplete(cvReady, clReady ?? undefined);
+        }
+      } catch (err) {
+        console.error("[BuildingPage] checkReady crashed", err);
       }
     };
 
