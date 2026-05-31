@@ -234,84 +234,68 @@ export default function BuildingPage() {
   // ══════════════════════════════════════════════════════════════════════════
   // PAID PLAN EFFECT
   // Anchored exclusively to generation_id (gid) — the PK of order_generations.
-  // Using .single() is safe: generation_id is a UUID primary key; exactly one
-  // row can ever match. order_generations holds both free (package_name="free")
-  // and paid rows; the gid from the URL always references the correct paid row.
+  // Using .maybeSingle() is safe: generation_id is a UUID primary key; exactly
+  // one row can ever match (or null if not yet committed).
   // ══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if (isFree) return;
     if (!gid)   { navigate("/my-account?view=downloads"); return; }
 
+    let cancelled = false;
+
     cursorTimerRef.current = setInterval(() => setCursorOn(p => !p), CURSOR_BLINK);
     typeTimerRef.current   = setTimeout(scheduleNextChar, 300);
 
-    const checkExisting = async (): Promise<boolean> => {
-      try {
-        const { data } = await supabase
-          .from("order_generations")
-          .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
-          .eq("generation_id", gid)
-          .single();
-        const cvReady = data?.cv_pdf_url || data?.cv_file_path;
-        const clReady = data?.cl_pdf_url || data?.cl_file_path;
-        if (cvReady) {
-          markComplete(cvReady, clReady ?? undefined);
-          return true;
-        }
-      } catch {}
-      return false;
+    const checkReady = async () => {
+      const { data, error } = await supabase
+        .from("order_generations")
+        .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
+        .eq("generation_id", gid)
+        .maybeSingle();
+      if (error) {
+        console.error("[BuildingPage]", error);
+        return;
+      }
+      if (cancelled) return;
+      const cvReady = data?.cv_pdf_url || data?.cv_file_path;
+      const clReady = data?.cl_pdf_url || data?.cl_file_path;
+      if (cvReady) {
+        markComplete(cvReady, clReady ?? undefined);
+      }
     };
 
-    checkExisting().then(done => {
-      if (done) return;
+    // ── Realtime subscription — tracks this exact generation_id row ──────
+    // The filter `generation_id=eq.${gid}` is unambiguous: it references one
+    // UUID PK in a table that contains only paid, confirmed rows.
+    channelRef.current = supabase
+      .channel(`building-paid-${gid}`)
+      .on("postgres_changes", {
+        event:  "UPDATE",
+        schema: "public",
+        table:  "order_generations",
+        filter: `generation_id=eq.${gid}`,
+      }, (payload: any) => {
+        if (cancelled) return;
+        const cvReady = payload.new?.cv_pdf_url || payload.new?.cv_file_path;
+        const clReady = payload.new?.cl_pdf_url || payload.new?.cl_file_path;
+        if (cvReady) {
+          markComplete(cvReady, clReady ?? undefined);
+        }
+      })
+      .subscribe();
 
-      // ── Realtime subscription — tracks this exact generation_id row ──────
-      // The filter `generation_id=eq.${gid}` is unambiguous: it references one
-      // UUID PK in a table that contains only paid, confirmed rows.
-      channelRef.current = supabase
-        .channel(`building-paid-${gid}`)
-        .on("postgres_changes", {
-          event:  "UPDATE",
-          schema: "public",
-          table:  "order_generations",
-          filter: `generation_id=eq.${gid}`,
-        }, (payload: any) => {
-          const cvReady = payload.new?.cv_pdf_url || payload.new?.cv_file_path;
-          const clReady = payload.new?.cl_pdf_url || payload.new?.cl_file_path;
-          if (cvReady) {
-            markComplete(cvReady, clReady ?? undefined);
-          }
-        })
-        .subscribe();
+    // ── Initial check + polling every 3 s ────────────────────────────────
+    checkReady();
+    pollRef.current = setInterval(checkReady, 3000);
 
-      // ── Fallback polling — starts 10 s after Realtime subscription ────────
-      const startPoll = setTimeout(() => {
-        pollRef.current = setInterval(async () => {
-          try {
-            const { data } = await supabase
-              .from("order_generations")
-              .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
-              .eq("generation_id", gid)
-              .single();
-            const cvReady = data?.cv_pdf_url || data?.cv_file_path;
-            const clReady = data?.cl_pdf_url || data?.cl_file_path;
-            if (cvReady) {
-              markComplete(cvReady, clReady ?? undefined);
-            }
-          } catch {}
-        }, 6000);
-      }, 10000);
-
-      timeoutRef.current = setTimeout(() => setTimedOut(true), 3 * 60 * 1000);
-
-      return () => clearTimeout(startPoll);
-    });
+    timeoutRef.current = setTimeout(() => setTimedOut(true), 3 * 60 * 1000);
 
     return () => {
-      if (channelRef.current)    supabase.removeChannel(channelRef.current);
-      if (pollRef.current)       clearInterval(pollRef.current);
-      if (timeoutRef.current)    clearTimeout(timeoutRef.current);
-      if (typeTimerRef.current)  clearTimeout(typeTimerRef.current);
+      cancelled = true;
+      if (channelRef.current)     supabase.removeChannel(channelRef.current);
+      if (pollRef.current)        clearInterval(pollRef.current);
+      if (timeoutRef.current)     clearTimeout(timeoutRef.current);
+      if (typeTimerRef.current)   clearTimeout(typeTimerRef.current);
       if (cursorTimerRef.current) clearInterval(cursorTimerRef.current);
     };
   }, [gid]); // eslint-disable-line react-hooks/exhaustive-deps
