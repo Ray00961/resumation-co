@@ -101,12 +101,6 @@ export default function BuildingPage() {
     if (typeTimerRef.current)   clearTimeout(typeTimerRef.current);
     if (cursorTimerRef.current) clearInterval(cursorTimerRef.current);
 
-    // The generate-cv function updates order_generations, then the user
-    // should land in the Downloads view. Keep the success state briefly so
-    // the user sees completion, then move them to the archive.
-    window.setTimeout(() => {
-      navigate("/my-account?view=downloads");
-    }, 2000);
   };
 
   // ── Typewriter (paid plan only) ───────────────────────────────────────────
