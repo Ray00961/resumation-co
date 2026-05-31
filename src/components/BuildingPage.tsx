@@ -241,12 +241,16 @@ export default function BuildingPage() {
     if (isFree) return;
     if (!gid)   { navigate("/my-account?view=downloads"); return; }
 
+    console.log("[BuildingPage] effect start", { gid, isFree });
+    
     let cancelled = false;
 
     cursorTimerRef.current = setInterval(() => setCursorOn(p => !p), CURSOR_BLINK);
     typeTimerRef.current   = setTimeout(scheduleNextChar, 300);
 
     const checkReady = async () => {
+      console.log("[BuildingPage] checkReady called");
+      
       const { data, error } = await supabase
         .from("order_generations")
         .select("cv_pdf_url, cv_file_path, cl_pdf_url, cl_file_path")
