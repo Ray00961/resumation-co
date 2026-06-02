@@ -113,11 +113,16 @@ export default function SuccessPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [currentUser, setCurrentUser] = useState<{ id: string; email: string } | null>(null);
-  const [displaySid,  setDisplaySid]  = useState<string>("");
-  const [generating,  setGenerating]  = useState<"en" | "ar" | null>(null);
-  const [pageLoading, setPageLoading] = useState(true);
-  const [invoiceData, setInvoiceData] = useState<InvoiceData | null>(null);
+  const [currentUser,       setCurrentUser]       = useState<{ id: string; email: string } | null>(null);
+  const [displaySid,        setDisplaySid]        = useState<string>("");
+  const [generating,        setGenerating]        = useState<"en" | "ar" | null>(null);
+  const [pageLoading,       setPageLoading]       = useState(true);
+  const [invoiceData,       setInvoiceData]       = useState<InvoiceData | null>(null);
+  // Mirrors gidRef so React re-renders when gid resolves — critical for enabling buttons
+  // after the safety timeout fires (pure ref writes don't trigger renders).
+  const [resolvedGidState,  setResolvedGidState]  = useState<string>("");
+  // Shown if both confirm-payment and the fallback DB query fail to return a gid.
+  const [gidError,          setGidError]          = useState<string | null>(null);
 
   // ── URL params ─────────────────────────────────────────────────────────────
   // WishMoney path: /success?gid=<generation_id>&tid=<transaction_id>&plan=<plan>
@@ -137,6 +142,8 @@ export default function SuccessPage() {
 
   // ── Synchronous refs ───────────────────────────────────────────────────────
   // These are set once in init() and read synchronously by the click handler.
+  // gidRef is always kept in sync with resolvedGidState — the ref for synchronous
+  // access in the click handler, the state for React re-render triggering.
   const tokenRef  = useRef<string>("");
   const userIdRef = useRef<string>("");
   const gidRef    = useRef<string>(urlGid);  // generation_id PK — primary canonical anchor
@@ -149,8 +156,14 @@ export default function SuccessPage() {
     if (didInit.current) return;
     didInit.current = true;
 
+    // WishMoney: gid is already in the URL — seed state immediately so buttons
+    // are enabled as soon as the page loads without waiting for init().
+    if (urlGid) setResolvedGidState(urlGid);
+
     const init = async () => {
-      const safetyTimeout = setTimeout(() => setPageLoading(false), 5000);
+      // 12 s safety net — long enough for confirm-payment to complete on slow
+      // connections, but prevents an infinite spinner if everything hangs.
+      const safetyTimeout = setTimeout(() => setPageLoading(false), 12_000);
 
       try {
         let authUserId = "";
@@ -223,91 +236,96 @@ export default function SuccessPage() {
           gidRef.current  = urlGid;
           tidRef.current  = urlTid;
           planRef.current = urlPlan || "premium";
+          // State already seeded at top of useEffect — this is a no-op re-set.
+          setResolvedGidState(urlGid);
         }
 
         // ════════════════════════════════════════════════════════════════════
         // PATH B — Paymob
         // Detected by success=true + a real paymob order id in the URL.
-        // gid is NOT in the URL. Two sub-cases:
-        //   B1. Row already exists (e.g. previous page load ran the cold-insert).
-        //       Seed refs, fire an idempotent re-confirm, then proceed.
-        //   B2. Row does NOT exist yet. confirm-payment is the INSERT engine —
-        //       await its response to receive the freshly minted generation_id.
+        // gid is NOT in the URL. Strategy:
+        //   1. Always call confirm-payment first (awaited). It is idempotent:
+        //      Stage 1 returns the existing generation_id if the row was already
+        //      created; Stage 3 performs the birth INSERT if it was not.
+        //   2. If confirm-payment returns generation_id → done.
+        //   3. Otherwise fall back to a direct DB lookup filtered by the exact
+        //      paymob_order_id. Never use "latest row" — that is unsafe.
+        //   4. If both steps fail → show a user-visible error message.
+        //
+        // Note: because confirm-payment can take several seconds and the safety
+        // timeout above may fire first (rendering the page before this resolves),
+        // we always call setResolvedGidState() alongside gidRef assignments so
+        // that React re-renders and enables the buttons whenever gid arrives —
+        // even after the safety spinner has already been dismissed.
         // ════════════════════════════════════════════════════════════════════
         else if (isPaymobReturn) {
-          const { data: existingRow } = await supabase
-            .from("order_generations")
-            .select("generation_id, submission_id, package_name")
-            .eq("user_id", authUserId)
-            .order("created_at_utc", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+          const planHint = urlPlan || sessionStorage.getItem("rsm_plan") || "premium";
 
-          if (existingRow?.generation_id) {
-            // ── B1: Row exists ──────────────────────────────────────────────
-            resolvedGid     = existingRow.generation_id;
-            gidRef.current  = existingRow.generation_id;
-            planRef.current = existingRow.package_name || urlPlan || "premium";
-            if (existingRow.submission_id) setDisplaySid(existingRow.submission_id);
-
-            // Fire idempotent re-confirm — Stage 1 idempotency exits immediately
-            console.log("[SuccessPage:confirm-payment] start (B1 re-confirm)", {
-              generation_id:   existingRow.generation_id,
+          // ── Step 1: confirm-payment (always await) ──────────────────────
+          try {
+            console.log("[SuccessPage:confirm-payment] start", {
               paymob_order_id: paymobOrderId,
+              plan: planHint,
             });
-            fetch(`${SUPABASE_URL}/functions/v1/confirm-payment`, {
+
+            const cpRes = await fetch(`${SUPABASE_URL}/functions/v1/confirm-payment`, {
               method:  "POST",
               headers: {
                 "Content-Type":  "application/json",
                 "Authorization": `Bearer ${authToken}`,
               },
               body: JSON.stringify({
-                generation_id:   existingRow.generation_id,
-                paymob_order_id: paymobOrderId,
-                source:          "paymob",
-              }),
-            })
-              .then(r => r.json().catch(() => ({})))
-              .then(body => console.log("[SuccessPage:confirm-payment] response (B1):", body))
-              .catch(e => console.error("[SuccessPage] confirm-payment re-confirm:", e));
-
-          } else {
-            // ── B2: No row — confirm-payment performs the Paymob birth INSERT ──
-            // Derive the plan from URL param → sessionStorage hint → default "premium"
-            const planHint = urlPlan || sessionStorage.getItem("rsm_plan") || "premium";
-
-            try {
-              console.log("[SuccessPage:confirm-payment] start (B2 cold-insert)", {
                 paymob_order_id: paymobOrderId,
                 plan:            planHint,
-              });
+                source:          "paymob",
+              }),
+            });
+            const cpResult = await cpRes.json().catch(() => ({}));
 
-              const cpRes = await fetch(`${SUPABASE_URL}/functions/v1/confirm-payment`, {
-                method:  "POST",
-                headers: {
-                  "Content-Type":  "application/json",
-                  "Authorization": `Bearer ${authToken}`,
-                },
-                body: JSON.stringify({
-                  paymob_order_id: paymobOrderId,
-                  plan:            planHint,
-                  source:          "paymob",
-                }),
-              });
-              const cpResult = await cpRes.json().catch(() => ({}));
+            console.log("[SuccessPage:confirm-payment] response", cpResult);
 
-              console.log("[SuccessPage:confirm-payment] response (B2):", cpResult);
+            if (cpResult?.generation_id) {
+              resolvedGid     = cpResult.generation_id;
+              gidRef.current  = cpResult.generation_id;
+              planRef.current = planHint;
+              setResolvedGidState(cpResult.generation_id);
+            }
+          } catch (e) {
+            console.error("[SuccessPage:confirm-payment] error:", e);
+          }
 
-              if (cpResult?.generation_id) {
-                resolvedGid     = cpResult.generation_id;
-                gidRef.current  = cpResult.generation_id;
-                planRef.current = planHint;
-              } else {
-                console.error("[SuccessPage] confirm-payment cold-insert returned no generation_id", cpResult);
+          // ── Step 2: Fallback — exact paymob_order_id lookup ─────────────
+          if (!resolvedGid) {
+            console.log("[SuccessPage:fallback] order_generations by paymob_order_id:", paymobOrderId);
+            try {
+              const { data: fallbackRow } = await supabase
+                .from("order_generations")
+                .select("generation_id, submission_id, package_name")
+                .eq("user_id", authUserId)
+                .eq("paymob_order_id", paymobOrderId)
+                .maybeSingle();
+
+              console.log("[SuccessPage:fallback] result:", fallbackRow);
+
+              if (fallbackRow?.generation_id) {
+                resolvedGid     = fallbackRow.generation_id;
+                gidRef.current  = fallbackRow.generation_id;
+                planRef.current = fallbackRow.package_name || urlPlan || "premium";
+                if (fallbackRow.submission_id) setDisplaySid(fallbackRow.submission_id);
+                setResolvedGidState(fallbackRow.generation_id);
               }
             } catch (e) {
-              console.error("[SuccessPage] confirm-payment cold-insert error:", e);
+              console.error("[SuccessPage:fallback] error:", e);
             }
+          }
+
+          // ── Step 3: Both failed — surface a user-visible message ────────
+          if (!resolvedGid) {
+            console.error("[SuccessPage:error] could not resolve generation_id for paymobOrderId:", paymobOrderId);
+            setGidError(
+              `Payment confirmed. We are preparing your order. ` +
+              `Please refresh in a few seconds or contact support with reference: ${paymobOrderId}`
+            );
           }
         }
 
@@ -575,11 +593,26 @@ export default function SuccessPage() {
             Choose Your Document Bundle
           </p>
 
+          {/* gid still resolving — show inline spinner */}
+          {!resolvedGidState && !gidError && isPaymobReturn && (
+            <div className="flex items-center justify-center gap-2 mb-4 text-cyber-dim">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-[11px] font-bold uppercase tracking-widest">Preparing your order…</span>
+            </div>
+          )}
+
+          {/* gid could not be resolved — support message */}
+          {gidError && (
+            <div className="mb-4 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-400 text-[12px] font-bold text-left leading-relaxed">
+              {gidError}
+            </div>
+          )}
+
           <div className="flex flex-col gap-3">
             {/* English bundle */}
             <button
               onClick={() => handleGenerateBundle("en")}
-              disabled={!!generating || !gidRef.current}
+              disabled={!!generating || !resolvedGidState}
               className="w-full py-4 px-5 rounded-2xl border-2 border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10 hover:border-emerald-500/50 text-white font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ boxShadow: generating === "en" ? "0 0 20px rgba(16,185,129,0.15)" : undefined }}
             >
@@ -598,7 +631,7 @@ export default function SuccessPage() {
             {/* Arabic bundle */}
             <button
               onClick={() => handleGenerateBundle("ar")}
-              disabled={!!generating || !gidRef.current}
+              disabled={!!generating || !resolvedGidState}
               className="w-full py-4 px-5 rounded-2xl border-2 border-[#E0C58F]/25 bg-[#E0C58F]/5 hover:bg-[#E0C58F]/10 hover:border-[#E0C58F]/45 text-white font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ boxShadow: generating === "ar" ? "0 0 20px rgba(224,197,143,0.12)" : undefined }}
             >
