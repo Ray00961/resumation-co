@@ -121,11 +121,19 @@ export default function SuccessPage() {
 
   // ── URL params ─────────────────────────────────────────────────────────────
   // WishMoney path: /success?gid=<generation_id>&tid=<transaction_id>&plan=<plan>
-  // Paymob path:    /success?order=<paymob_order_id>  (no gid — recovered via confirm-payment)
+  // Paymob path:    /success?order=<paymob_order_id>&success=true&...
+  //                 Paymob also sends "id" = transaction id — NOT the order id.
+  //                 We read "order" or "paymob_order_id" only; "id" is ignored for
+  //                 payment routing to avoid passing the wrong identifier to confirm-payment.
   const urlGid        = searchParams.get("gid")   || "";
   const urlTid        = searchParams.get("tid")   || "";
   const urlPlan       = searchParams.get("plan")  || "";
-  const paymobOrderId = searchParams.get("order") || searchParams.get("id") || "";
+  const urlSuccess    = searchParams.get("success") || "";
+  const paymobOrderId = searchParams.get("order") || searchParams.get("paymob_order_id") || "";
+
+  // Paymob return is detected by the success flag + a real order id.
+  // "success=true" is appended by Paymob to the redirect URL on confirmed payment.
+  const isPaymobReturn = urlSuccess === "true" && !!paymobOrderId;
 
   // ── Synchronous refs ───────────────────────────────────────────────────────
   // These are set once in init() and read synchronously by the click handler.
@@ -196,6 +204,12 @@ export default function SuccessPage() {
         userIdRef.current = authUserId;
         setCurrentUser({ id: authUserId, email: authEmail });
 
+        // ── Log Paymob return params for diagnosis ──────────────────────────
+        console.log("[SuccessPage:paymob] id param:", searchParams.get("id"));
+        console.log("[SuccessPage:paymob] order param:", searchParams.get("order"));
+        console.log("[SuccessPage:paymob] paymobOrderId selected:", paymobOrderId);
+        console.log("[SuccessPage:paymob] success param:", urlSuccess, "| isPaymobReturn:", isPaymobReturn);
+
         const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
         let resolvedGid = "";
 
@@ -213,14 +227,14 @@ export default function SuccessPage() {
 
         // ════════════════════════════════════════════════════════════════════
         // PATH B — Paymob
+        // Detected by success=true + a real paymob order id in the URL.
         // gid is NOT in the URL. Two sub-cases:
-        //   B1. Row already exists (e.g. webhook already wrote it, or previous
-        //       page load ran the cold-insert). Seed refs, fire a fire-and-
-        //       forget idempotent re-confirm, then proceed.
+        //   B1. Row already exists (e.g. previous page load ran the cold-insert).
+        //       Seed refs, fire an idempotent re-confirm, then proceed.
         //   B2. Row does NOT exist yet. confirm-payment is the INSERT engine —
         //       await its response to receive the freshly minted generation_id.
         // ════════════════════════════════════════════════════════════════════
-        else if (paymobOrderId) {
+        else if (isPaymobReturn) {
           const { data: existingRow } = await supabase
             .from("order_generations")
             .select("generation_id, submission_id, package_name")
@@ -237,6 +251,10 @@ export default function SuccessPage() {
             if (existingRow.submission_id) setDisplaySid(existingRow.submission_id);
 
             // Fire idempotent re-confirm — Stage 1 idempotency exits immediately
+            console.log("[SuccessPage:confirm-payment] start (B1 re-confirm)", {
+              generation_id:   existingRow.generation_id,
+              paymob_order_id: paymobOrderId,
+            });
             fetch(`${SUPABASE_URL}/functions/v1/confirm-payment`, {
               method:  "POST",
               headers: {
@@ -248,7 +266,10 @@ export default function SuccessPage() {
                 paymob_order_id: paymobOrderId,
                 source:          "paymob",
               }),
-            }).catch(e => console.error("[SuccessPage] confirm-payment re-confirm:", e));
+            })
+              .then(r => r.json().catch(() => ({})))
+              .then(body => console.log("[SuccessPage:confirm-payment] response (B1):", body))
+              .catch(e => console.error("[SuccessPage] confirm-payment re-confirm:", e));
 
           } else {
             // ── B2: No row — confirm-payment performs the Paymob birth INSERT ──
@@ -256,6 +277,11 @@ export default function SuccessPage() {
             const planHint = urlPlan || sessionStorage.getItem("rsm_plan") || "premium";
 
             try {
+              console.log("[SuccessPage:confirm-payment] start (B2 cold-insert)", {
+                paymob_order_id: paymobOrderId,
+                plan:            planHint,
+              });
+
               const cpRes = await fetch(`${SUPABASE_URL}/functions/v1/confirm-payment`, {
                 method:  "POST",
                 headers: {
@@ -269,6 +295,8 @@ export default function SuccessPage() {
                 }),
               });
               const cpResult = await cpRes.json().catch(() => ({}));
+
+              console.log("[SuccessPage:confirm-payment] response (B2):", cpResult);
 
               if (cpResult?.generation_id) {
                 resolvedGid     = cpResult.generation_id;
