@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import HTMLtoDOCX from "npm:html-to-docx@1.8.0";
+import HTMLtoDOCX from "https://esm.sh/html-to-docx@1.8.0";
 
 const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
