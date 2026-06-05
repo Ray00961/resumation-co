@@ -1,7 +1,7 @@
 import type { CvJsonV1 } from "../schemas/cv-json-v1.ts";
 import {
-  allowedDocumentLanguages,
   allowedCandidateLevels,
+  allowedDocumentLanguages,
 } from "../schemas/cv-json-v1.ts";
 import { normalizeCvJsonV1 } from "./normalize-cv-json.ts";
 
@@ -11,99 +11,192 @@ export interface ValidationResult {
   normalized?: CvJsonV1;
 }
 
-const HTML_TAG_RE = /<\/?[a-z][\s\S]*?>/i;
-const CSS_PROP_RE =
-  /(?:font-size|color|margin|padding|background|border|display|position|width|height)\s*:/i;
+type ItemValidator = (
+  item: unknown,
+  path: string,
+  errors: string[]
+) => void;
+
+const REQUIRED_ROOT_KEYS = [
+  "document_language",
+  "candidate_level",
+  "full_name",
+  "contact",
+  "contact_line",
+  "target_job",
+  "nationality",
+  "summary",
+  "core_competencies",
+  "experience",
+  "internships",
+  "education",
+  "certifications",
+  "projects",
+  "languages",
+] as const;
+
+const ROOT_STRING_FIELDS = [
+  "full_name",
+  "contact_line",
+  "target_job",
+  "nationality",
+  "summary",
+] as const;
+
+const CONTACT_FIELDS = ["email", "phone", "linkedin", "location"] as const;
+
+const CORE_COMPETENCY_GROUPS = [
+  "technical_skills",
+  "industry_knowledge",
+  "professional_skills",
+] as const;
+
+const HTML_TAG_RE = new RegExp("</?[a-z][\\s\\S]*?>", "i");
+
+const CSS_PROP_RE = new RegExp(
+  "(color|font-size|font-weight|font-family|text-transform|text-align|line-height|letter-spacing|margin|margin-top|margin-bottom|margin-left|margin-right|padding|padding-top|padding-bottom|padding-left|padding-right|background|background-color|border|border-top|border-bottom|border-left|border-right|display|position|width|height|white-space)\\s*:",
+  "i"
+);
+
 const HTML_ENTITY_RE = /&(?:lt|gt|amp|quot|apos);/i;
 const MD_FENCE_RE = /```/;
-const PLACEHOLDER_RE =
-  /^(?:N\/A|TBD|Lorem Ipsum|Coming Soon|Example Company|Example Name)$/i;
+
+const PLACEHOLDER_RE = new RegExp(
+  "^(N/A|TBD|Lorem Ipsum|Coming Soon|Example Company|Example Name|Sample Company|Sample Name|Your Name|Your Email|your\\.email@example\\.com|example@example\\.com)$",
+  "i"
+);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function detectUnsafe(value: string): string | null {
+  const trimmed = value.trim();
+
   if (HTML_TAG_RE.test(value)) return "contains HTML tags";
   if (CSS_PROP_RE.test(value)) return "contains CSS-like content";
   if (HTML_ENTITY_RE.test(value)) return "contains HTML entities";
   if (MD_FENCE_RE.test(value)) return "contains markdown code fences";
-  if (PLACEHOLDER_RE.test(value.trim())) return "is a placeholder value";
+  if (PLACEHOLDER_RE.test(trimmed)) return "is a placeholder value";
+
   return null;
 }
 
-function checkStr(value: unknown, path: string, errors: string[]): void {
+function checkRequiredKeys(
+  obj: Record<string, unknown>,
+  keys: readonly string[],
+  path: string,
+  errors: string[]
+): void {
+  for (const key of keys) {
+    if (!(key in obj)) {
+      errors.push(`${path}.${key} is required`);
+    }
+  }
+}
+
+function checkString(value: unknown, path: string, errors: string[]): void {
   if (value === null || value === undefined) {
     errors.push(`${path} is required`);
     return;
   }
+
   if (typeof value !== "string") {
     errors.push(`${path} must be a string`);
     return;
   }
+
   const issue = detectUnsafe(value);
-  if (issue) errors.push(`${path} ${issue}`);
+  if (issue) {
+    errors.push(`${path} ${issue}`);
+  }
 }
 
-function checkStrArr(value: unknown, path: string, errors: string[]): void {
+function checkStringArray(
+  value: unknown,
+  path: string,
+  errors: string[]
+): void {
   if (!Array.isArray(value)) {
     errors.push(`${path} must be an array`);
     return;
   }
-  (value as unknown[]).forEach((item, i) => {
+
+  value.forEach((item, index) => {
     if (typeof item !== "string") {
-      errors.push(`${path}[${i}] must be a string`);
-    } else {
-      const issue = detectUnsafe(item);
-      if (issue) errors.push(`${path}[${i}] ${issue}`);
+      errors.push(`${path}[${index}] must be a string`);
+      return;
+    }
+
+    const issue = detectUnsafe(item);
+    if (issue) {
+      errors.push(`${path}[${index}] ${issue}`);
     }
   });
 }
 
-function validateExpItem(
+function validateObjectItem(
   item: unknown,
   path: string,
-  errors: string[]
+  errors: string[],
+  stringFields: readonly string[],
+  stringArrayFields: readonly string[] = []
 ): void {
-  if (typeof item !== "object" || item === null) {
-    errors.push(`${path} must be an object`);
+  if (!isRecord(item)) {
+    errors.push(`${path} must be a non-null object`);
     return;
   }
-  const i = item as Record<string, unknown>;
-  checkStr(i.job_title, `${path}.job_title`, errors);
-  checkStr(i.company, `${path}.company`, errors);
-  checkStr(i.location, `${path}.location`, errors);
-  checkStr(i.date_range, `${path}.date_range`, errors);
-  checkStrArr(i.bullets, `${path}.bullets`, errors);
+
+  checkRequiredKeys(item, [...stringFields, ...stringArrayFields], path, errors);
+
+  for (const field of stringFields) {
+    if (field in item) {
+      checkString(item[field], `${path}.${field}`, errors);
+    }
+  }
+
+  for (const field of stringArrayFields) {
+    if (field in item) {
+      checkStringArray(item[field], `${path}.${field}`, errors);
+    }
+  }
 }
 
-function validateEduItem(
+function validateExperienceItem(
   item: unknown,
   path: string,
   errors: string[]
 ): void {
-  if (typeof item !== "object" || item === null) {
-    errors.push(`${path} must be an object`);
-    return;
-  }
-  const i = item as Record<string, unknown>;
-  checkStr(i.degree, `${path}.degree`, errors);
-  checkStr(i.major, `${path}.major`, errors);
-  checkStr(i.institution, `${path}.institution`, errors);
-  checkStr(i.location, `${path}.location`, errors);
-  checkStr(i.date_range, `${path}.date_range`, errors);
-  checkStr(i.gpa, `${path}.gpa`, errors);
+  validateObjectItem(
+    item,
+    path,
+    errors,
+    ["job_title", "company", "location", "date_range"],
+    ["bullets"]
+  );
 }
 
-function validateCertItem(
+function validateEducationItem(
   item: unknown,
   path: string,
   errors: string[]
 ): void {
-  if (typeof item !== "object" || item === null) {
-    errors.push(`${path} must be an object`);
-    return;
-  }
-  const i = item as Record<string, unknown>;
-  checkStr(i.name, `${path}.name`, errors);
-  checkStr(i.issuer, `${path}.issuer`, errors);
-  checkStr(i.date, `${path}.date`, errors);
+  validateObjectItem(item, path, errors, [
+    "degree",
+    "major",
+    "institution",
+    "location",
+    "date_range",
+    "gpa",
+  ]);
+}
+
+function validateCertificationItem(
+  item: unknown,
+  path: string,
+  errors: string[]
+): void {
+  validateObjectItem(item, path, errors, ["name", "issuer", "date"]);
 }
 
 function validateProjectItem(
@@ -111,67 +204,66 @@ function validateProjectItem(
   path: string,
   errors: string[]
 ): void {
-  if (typeof item !== "object" || item === null) {
-    errors.push(`${path} must be an object`);
-    return;
-  }
-  const i = item as Record<string, unknown>;
-  checkStr(i.title, `${path}.title`, errors);
-  checkStr(i.date, `${path}.date`, errors);
-  checkStr(i.description, `${path}.description`, errors);
-  checkStrArr(i.bullets, `${path}.bullets`, errors);
+  validateObjectItem(
+    item,
+    path,
+    errors,
+    ["title", "date", "description"],
+    ["bullets"]
+  );
 }
 
-function validateLangItem(
+function validateLanguageItem(
   item: unknown,
   path: string,
   errors: string[]
 ): void {
-  if (typeof item !== "object" || item === null) {
-    errors.push(`${path} must be an object`);
+  validateObjectItem(item, path, errors, ["language", "level"]);
+}
+
+function validateArraySection(
+  cv: Record<string, unknown>,
+  field: string,
+  validateItem: ItemValidator,
+  errors: string[]
+): void {
+  if (!(field in cv)) {
     return;
   }
-  const i = item as Record<string, unknown>;
-  checkStr(i.language, `${path}.language`, errors);
-  checkStr(i.level, `${path}.level`, errors);
+
+  const value = cv[field];
+
+  if (!Array.isArray(value)) {
+    errors.push(`${field} must be an array`);
+    return;
+  }
+
+  value.forEach((item, index) => {
+    validateItem(item, `${field}[${index}]`, errors);
+  });
 }
 
 export function validateCvJsonV1(input: unknown): ValidationResult {
   const errors: string[] = [];
 
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    return { valid: false, errors: ["input must be a non-null object"] };
+  if (!isRecord(input)) {
+    return {
+      valid: false,
+      errors: ["input must be a non-null object"],
+    };
   }
 
-  const cv = input as Record<string, unknown>;
+  const cv = input;
 
-  // Required root keys
-  const requiredKeys = [
-    "document_language",
-    "candidate_level",
-    "full_name",
-    "contact",
-    "contact_line",
-    "target_job",
-    "nationality",
-    "summary",
-    "core_competencies",
-    "experience",
-    "internships",
-    "education",
-    "certifications",
-    "projects",
-    "languages",
-  ];
-  for (const key of requiredKeys) {
+  for (const key of REQUIRED_ROOT_KEYS) {
     if (!(key in cv)) {
       errors.push(`${key} is required`);
     }
   }
 
-  // document_language
   if ("document_language" in cv) {
     const lang = cv.document_language;
+
     if (
       typeof lang !== "string" ||
       !(allowedDocumentLanguages as readonly string[]).includes(lang)
@@ -182,9 +274,9 @@ export function validateCvJsonV1(input: unknown): ValidationResult {
     }
   }
 
-  // candidate_level
   if ("candidate_level" in cv) {
     const level = cv.candidate_level;
+
     if (
       typeof level !== "string" ||
       !(allowedCandidateLevels as readonly string[]).includes(level)
@@ -195,83 +287,72 @@ export function validateCvJsonV1(input: unknown): ValidationResult {
     }
   }
 
-  // Root string fields
-  for (const field of [
-    "full_name",
-    "contact_line",
-    "target_job",
-    "nationality",
-    "summary",
-  ]) {
+  for (const field of ROOT_STRING_FIELDS) {
     if (field in cv) {
-      checkStr(cv[field], field, errors);
+      checkString(cv[field], field, errors);
     }
   }
 
-  // contact
   if ("contact" in cv) {
-    if (
-      typeof cv.contact !== "object" ||
-      cv.contact === null ||
-      Array.isArray(cv.contact)
-    ) {
+    const contact = cv.contact;
+
+    if (!isRecord(contact)) {
       errors.push("contact must be a non-null object");
     } else {
-      const contact = cv.contact as Record<string, unknown>;
-      for (const field of ["email", "phone", "linkedin", "location"]) {
-        checkStr(contact[field], `contact.${field}`, errors);
+      checkRequiredKeys(contact, CONTACT_FIELDS, "contact", errors);
+
+      for (const field of CONTACT_FIELDS) {
+        if (field in contact) {
+          checkString(contact[field], `contact.${field}`, errors);
+        }
       }
     }
   }
 
-  // core_competencies
   if ("core_competencies" in cv) {
-    if (
-      typeof cv.core_competencies !== "object" ||
-      cv.core_competencies === null ||
-      Array.isArray(cv.core_competencies)
-    ) {
+    const coreCompetencies = cv.core_competencies;
+
+    if (!isRecord(coreCompetencies)) {
       errors.push("core_competencies must be a non-null object");
     } else {
-      const cc = cv.core_competencies as Record<string, unknown>;
-      for (const group of [
-        "technical_skills",
-        "industry_knowledge",
-        "professional_skills",
-      ]) {
-        checkStrArr(cc[group], `core_competencies.${group}`, errors);
+      checkRequiredKeys(
+        coreCompetencies,
+        CORE_COMPETENCY_GROUPS,
+        "core_competencies",
+        errors
+      );
+
+      for (const group of CORE_COMPETENCY_GROUPS) {
+        if (group in coreCompetencies) {
+          checkStringArray(
+            coreCompetencies[group],
+            `core_competencies.${group}`,
+            errors
+          );
+        }
       }
     }
   }
 
-  // Array sections
-  const arrayFields: Array<
-    [string, (item: unknown, path: string, errors: string[]) => void]
-  > = [
-    ["experience", validateExpItem],
-    ["internships", validateExpItem],
-    ["education", validateEduItem],
-    ["certifications", validateCertItem],
-    ["projects", validateProjectItem],
-    ["languages", validateLangItem],
-  ];
-
-  for (const [field, validateItem] of arrayFields) {
-    if (field in cv) {
-      if (!Array.isArray(cv[field])) {
-        errors.push(`${field} must be an array`);
-      } else {
-        (cv[field] as unknown[]).forEach((item, i) => {
-          validateItem(item, `${field}[${i}]`, errors);
-        });
-      }
-    }
-  }
+  validateArraySection(cv, "experience", validateExperienceItem, errors);
+  validateArraySection(cv, "internships", validateExperienceItem, errors);
+  validateArraySection(cv, "education", validateEducationItem, errors);
+  validateArraySection(cv, "certifications", validateCertificationItem, errors);
+  validateArraySection(cv, "projects", validateProjectItem, errors);
+  validateArraySection(cv, "languages", validateLanguageItem, errors);
 
   if (errors.length > 0) {
-    return { valid: false, errors };
+    return {
+      valid: false,
+      errors,
+    };
   }
 
-  const normalized = normalizeCvJsonV1(input as CvJsonV1);
-  return { valid: true, errors: [], normalized };
+  const normalized = normalizeCvJsonV1(cv as unknown as CvJsonV1);
+
+  return {
+    valid: true,
+    errors: [],
+    normalized,
+  };
 }

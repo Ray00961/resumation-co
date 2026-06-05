@@ -1,25 +1,32 @@
 import type {
-  CvJsonV1,
-  ExperienceItem,
-  EducationItem,
   CertificationItem,
-  ProjectItem,
+  CvJsonV1,
+  EducationItem,
+  ExperienceItem,
   LanguageItem,
+  ProjectItem,
 } from "../schemas/cv-json-v1.ts";
 import { buildContactLine } from "../docx/utils/contact-utils.ts";
 
-function safeStr(v: unknown): string {
-  return typeof v === "string" ? v.trim() : "";
+function safeStr(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
-function safeStrArr(v: unknown): string[] {
-  if (!Array.isArray(v)) return [];
-  return (v as unknown[])
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
+function safeStrArr(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => safeStr(item))
     .filter((item) => item !== "");
 }
 
-function normalizeExpItem(item: ExperienceItem): ExperienceItem {
+function safeArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function normalizeExperienceItem(item: ExperienceItem): ExperienceItem {
   return {
     job_title: safeStr(item.job_title),
     company: safeStr(item.company),
@@ -29,7 +36,7 @@ function normalizeExpItem(item: ExperienceItem): ExperienceItem {
   };
 }
 
-function normalizeEduItem(item: EducationItem): EducationItem {
+function normalizeEducationItem(item: EducationItem): EducationItem {
   return {
     degree: safeStr(item.degree),
     major: safeStr(item.major),
@@ -40,7 +47,9 @@ function normalizeEduItem(item: EducationItem): EducationItem {
   };
 }
 
-function normalizeCertItem(item: CertificationItem): CertificationItem {
+function normalizeCertificationItem(
+  item: CertificationItem
+): CertificationItem {
   return {
     name: safeStr(item.name),
     issuer: safeStr(item.issuer),
@@ -57,7 +66,7 @@ function normalizeProjectItem(item: ProjectItem): ProjectItem {
   };
 }
 
-function normalizeLangItem(item: LanguageItem): LanguageItem {
+function normalizeLanguageItem(item: LanguageItem): LanguageItem {
   return {
     language: safeStr(item.language),
     level: safeStr(item.level),
@@ -66,14 +75,16 @@ function normalizeLangItem(item: LanguageItem): LanguageItem {
 
 export function normalizeCvJsonV1(cv: CvJsonV1): CvJsonV1 {
   const contact = {
-    email: safeStr(cv.contact.email),
-    phone: safeStr(cv.contact.phone),
-    linkedin: safeStr(cv.contact.linkedin),
-    location: safeStr(cv.contact.location),
+    email: safeStr(cv.contact?.email),
+    phone: safeStr(cv.contact?.phone),
+    linkedin: safeStr(cv.contact?.linkedin),
+    location: safeStr(cv.contact?.location),
   };
 
-  const rawLine = safeStr(cv.contact_line);
-  const contact_line = rawLine !== "" ? rawLine : buildContactLine(contact);
+  const contactLineFromInput = safeStr(cv.contact_line);
+
+  const contact_line =
+    contactLineFromInput !== "" ? contactLineFromInput : buildContactLine(contact);
 
   return {
     document_language: cv.document_language,
@@ -85,15 +96,23 @@ export function normalizeCvJsonV1(cv: CvJsonV1): CvJsonV1 {
     nationality: safeStr(cv.nationality),
     summary: safeStr(cv.summary),
     core_competencies: {
-      technical_skills: safeStrArr(cv.core_competencies.technical_skills),
-      industry_knowledge: safeStrArr(cv.core_competencies.industry_knowledge),
-      professional_skills: safeStrArr(cv.core_competencies.professional_skills),
+      technical_skills: safeStrArr(cv.core_competencies?.technical_skills),
+      industry_knowledge: safeStrArr(cv.core_competencies?.industry_knowledge),
+      professional_skills: safeStrArr(cv.core_competencies?.professional_skills),
     },
-    experience: cv.experience.map(normalizeExpItem),
-    internships: cv.internships.map(normalizeExpItem),
-    education: cv.education.map(normalizeEduItem),
-    certifications: cv.certifications.map(normalizeCertItem),
-    projects: cv.projects.map(normalizeProjectItem),
-    languages: cv.languages.map(normalizeLangItem),
+    experience: safeArray<ExperienceItem>(cv.experience).map(
+      normalizeExperienceItem
+    ),
+    internships: safeArray<ExperienceItem>(cv.internships).map(
+      normalizeExperienceItem
+    ),
+    education: safeArray<EducationItem>(cv.education).map(
+      normalizeEducationItem
+    ),
+    certifications: safeArray<CertificationItem>(cv.certifications).map(
+      normalizeCertificationItem
+    ),
+    projects: safeArray<ProjectItem>(cv.projects).map(normalizeProjectItem),
+    languages: safeArray<LanguageItem>(cv.languages).map(normalizeLanguageItem),
   };
 }
