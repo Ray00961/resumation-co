@@ -818,17 +818,22 @@ Do not convert Diplomas into Degrees.
 
 Universities
 
-- Preserve widely recognized university names.
-- Keep official university names in English when they are commonly used internationally.
+For Arabic CVs:
+
+- Translate university names into their standard Arabic form whenever a well-known Arabic equivalent exists.
+- Only keep the English name when no reliable Arabic equivalent exists.
 - Do not invent university names.
 
 Examples:
 
 Mansoura University
-→ Mansoura University
+→ جامعة المنصورة
 
 Cairo University
-→ Cairo University
+→ جامعة القاهرة
+
+Alexandria University
+→ جامعة الإسكندرية
 
 ---
 
@@ -852,17 +857,23 @@ Mechanical Engineering
 
 Companies
 
-- Preserve company names exactly as provided.
-- Do not translate company names.
-- Do not invent Arabic company names.
+- For government authorities, ministries, universities, hospitals, public institutions, or well-known organizations with established Arabic names, use the Arabic name.
+- For private companies without established Arabic names, preserve exactly as provided.
+- Do not invent translations.
 
 Examples:
 
 Egyptian Drug Authority
-→ Egyptian Drug Authority
+→ هيئة الدواء المصرية
+
+Ministry of Health
+→ وزارة الصحة
 
 Tibah Hospital
-→ Tibah Hospital
+→ مستشفى طيبة
+
+Mansoura University
+→ جامعة المنصورة
 
 ---
 
