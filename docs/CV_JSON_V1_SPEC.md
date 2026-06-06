@@ -183,19 +183,19 @@ Schema:
 
 Rules:
 
-- Use empty strings for missing fields.
-- Do not invent contact information.
-- Preserve email exactly as provided.
-- Preserve phone exactly as provided.
-- Preserve LinkedIn URL exactly as provided.
-- Preserve location exactly as provided.
+* Use empty strings for missing fields.
+* Do not invent contact information.
+* Preserve email exactly as provided.
+* Preserve phone exactly as provided.
+* Preserve LinkedIn URL exactly as provided.
+* Preserve location exactly as provided.
 
 Required Contact Fields:
 
-- email
-- phone
-- linkedin
-- location
+* email
+* phone
+* linkedin
+* location
 
 ---
 
@@ -211,23 +211,31 @@ Yes
 
 Purpose:
 
-Single-line contact information.
+Single-line contact information used by the CV header.
 
 Examples:
 
 * email | phone
 * email | phone | city
-* email | phone | nationality
+* email | phone | linkedin | city
 
 Rules:
 
-- Generated from available contact fields.
-- Do not invent contact information.
-- Do not include empty values.
-- Preserve the original email.
-- Preserve the original phone number.
-- Preserve LinkedIn when available.
-- Preserve location when available.
+* Generated only from available contact fields.
+* Allowed source fields are:
+
+  * contact.email
+  * contact.phone
+  * contact.linkedin
+  * contact.location
+* Do not invent contact information.
+* Do not include empty values.
+* Do not include nationality automatically.
+* Do not include birth information automatically.
+* Preserve the original email.
+* Preserve the original phone number.
+* Preserve LinkedIn when available.
+* Preserve location when available.
 
 ---
 
@@ -266,6 +274,12 @@ No
 Purpose:
 
 Candidate nationality.
+
+Rules:
+
+* Keep nationality separate from `contact_line`.
+* Do not automatically render nationality in the header unless a future template explicitly supports it.
+* Do not use nationality to generate contact information.
 
 ---
 
@@ -370,7 +384,6 @@ Schema:
   "date_range": "",
   "bullets": []
 }
-
 ```
 
 Required:
@@ -574,7 +587,7 @@ Never remove the field.
 
 The following keys must always exist:
 
-```json
+```txt
 document_language
 candidate_level
 
@@ -611,6 +624,9 @@ GPT Output
 PDF Import
 → CvJsonV1
 
+Word Import
+→ CvJsonV1
+
 LinkedIn Import
 → CvJsonV1
 
@@ -641,6 +657,7 @@ CvJsonV1 is designed to support:
 * AI Job Match
 * Cover Letter Generation
 * PDF CV Import
+* Word CV Import
 * LinkedIn Import
 * Future AI Career Features
 

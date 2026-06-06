@@ -1,0 +1,74 @@
+{
+  "document_language": "en",
+  "candidate_level": "fresh_graduate",
+  "full_name": "Ahmed Hassan",
+  "contact": {
+    "email": "ahmed.hassan@example.com",
+    "phone": "+20 1000000000",
+    "linkedin": "linkedin.com/in/ahmedhassan",
+    "location": "Cairo, Egypt"
+  },
+  "contact_line": "ahmed.hassan@example.com | +20 1000000000 | linkedin.com/in/ahmedhassan | Cairo, Egypt",
+  "target_job": "Junior Software Engineer",
+  "nationality": "Egyptian",
+  "summary": "Recent Software Engineering graduate with academic exposure to frontend development, database design, and web application workflows. Built practical university projects involving e-commerce and inventory systems. Completed a summer internship supporting software development and testing tasks. Looking to apply technical skills in a professional development environment.",
+  "core_competencies": {
+    "technical_skills": ["JavaScript", "React", "HTML", "CSS", "SQL", "Python"],
+    "industry_knowledge": ["Software Development", "Database Design", "Web Applications", "Software Testing"],
+    "professional_skills": ["Problem Solving", "Team Collaboration", "Time Management", "Communication"]
+  },
+  "experience": [],
+  "internships": [
+    {
+      "job_title": "Software Engineering Intern",
+      "company": "ABC Technology",
+      "location": "Cairo, Egypt",
+      "date_range": "Jun 2024 – Aug 2024",
+      "bullets": [
+        "Assisted senior developers with feature development and bug fixes on an internal web application.",
+        "Participated in daily stand-ups and sprint planning sessions.",
+        "Wrote and ran basic test cases to validate application behavior.",
+        "Contributed to internal documentation for new features."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "degree": "Bachelor of Software Engineering",
+      "major": "Software Engineering",
+      "institution": "Cairo University",
+      "location": "Cairo, Egypt",
+      "date_range": "2020 – 2024",
+      "gpa": "3.7 / 4.0"
+    }
+  ],
+  "certifications": [
+    { "name": "Google Data Analytics Certificate", "issuer": "Google", "date": "2024" }
+  ],
+  "projects": [
+    {
+      "title": "E-commerce Website",
+      "date": "2023",
+      "description": "University project for an online retail platform.",
+      "bullets": [
+        "Developed product catalog and shopping cart functionality.",
+        "Implemented user authentication and session management.",
+        "Designed responsive layouts compatible with mobile and desktop."
+      ]
+    },
+    {
+      "title": "Inventory Management System",
+      "date": "2024",
+      "description": "Academic project for stock tracking and reporting.",
+      "bullets": [
+        "Designed relational database schema for inventory records.",
+        "Built inventory tracking, search, and update functions.",
+        "Generated summary reports for stock levels and movements."
+      ]
+    }
+  ],
+  "languages": [
+    { "language": "Arabic", "level": "Native" },
+    { "language": "English", "level": "Professional" }
+  ]
+}

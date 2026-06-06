@@ -1,0 +1,100 @@
+{
+  "document_language": "en",
+  "candidate_level": "junior",
+  "full_name": "Kholoud Gamal Abou Bakr Mousa",
+  "contact": {
+    "email": "Khallaodo@gmail.com",
+    "phone": "+20 1121304560",
+    "linkedin": "",
+    "location": "Dakahlia, Egypt"
+  },
+  "contact_line": "Khallaodo@gmail.com | +20 1121304560 | Dakahlia, Egypt",
+  "target_job": "Pharmacist",
+  "nationality": "Egyptian - Born in Saudi Arabia",
+  "summary": "Pharmacist with early-career experience in pharmaceutical regulatory inspection and hospital pharmacy. Currently serving as a Licensing Inspector at the Egyptian Drug Authority in Dakahlia, reviewing facility applications and supporting regulatory compliance procedures. Previous hospital experience covers prescription dispensing, patient-facing pharmacy tasks, and emergency pharmacy operations.",
+  "core_competencies": {
+    "technical_skills": [
+      "Microsoft Excel",
+      "Microsoft Word",
+      "Microsoft PowerPoint",
+      "Microsoft Teams",
+      "Google Sheets",
+      "OneDrive"
+    ],
+    "industry_knowledge": [
+      "Pharmaceutical Licensing",
+      "Regulatory Compliance",
+      "Hospital Pharmacy",
+      "Emergency Pharmacy",
+      "Clinical Research"
+    ],
+    "professional_skills": [
+      "Documentation Review",
+      "Report Preparation",
+      "Patient Communication",
+      "Attention to Detail"
+    ]
+  },
+  "experience": [
+    {
+      "job_title": "Licensing Inspector",
+      "company": "Egyptian Drug Authority",
+      "location": "Dakahlia, Egypt",
+      "date_range": "2024 – Present",
+      "bullets": [
+        "Reviews licensing applications submitted by pharmaceutical facilities and checks compliance with regulatory requirements.",
+        "Conducts field inspections of pharmaceutical premises and documents findings.",
+        "Follows up with facility owners on outstanding documentation and licensing conditions.",
+        "Maintains inspection records and prepares reports in accordance with Egyptian Drug Authority procedures."
+      ]
+    },
+    {
+      "job_title": "Hospital and Emergency Pharmacist",
+      "company": "Tibah Hospital",
+      "location": "Mansoura, Egypt",
+      "date_range": "2023",
+      "bullets": [
+        "Dispensed medications and managed prescription review in hospital and emergency pharmacy settings.",
+        "Worked alongside medical staff to support safe and accurate medication use for patients.",
+        "Handled medication preparation, labeling, and patient-facing pharmacy queries.",
+        "Maintained pharmacy records and followed regulated procedures for controlled and standard medications."
+      ]
+    }
+  ],
+  "internships": [],
+  "education": [
+    {
+      "degree": "Pharm D",
+      "major": "Pharmacy",
+      "institution": "Mansoura University",
+      "location": "Mansoura, Egypt",
+      "date_range": "2022 – 2025",
+      "gpa": ""
+    },
+    {
+      "degree": "Diploma",
+      "major": "Toxicology and Forensic Chemical Analysis",
+      "institution": "Mansoura University",
+      "location": "Mansoura, Egypt",
+      "date_range": "2021 – 2022",
+      "gpa": ""
+    },
+    {
+      "degree": "Bachelor's Degree",
+      "major": "Pharmacy",
+      "institution": "Faculty of Pharmacy and Pharmaceutical Manufacturing - Sinai University",
+      "location": "Kantara, Egypt",
+      "date_range": "2021",
+      "gpa": ""
+    }
+  ],
+  "certifications": [
+    { "name": "TOEFL", "issuer": "", "date": "" },
+    { "name": "IELTS", "issuer": "", "date": "" }
+  ],
+  "projects": [],
+  "languages": [
+    { "language": "Arabic", "level": "Native" },
+    { "language": "English", "level": "Fluent" }
+  ]
+}

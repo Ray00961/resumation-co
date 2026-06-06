@@ -2,7 +2,7 @@
 
 Status: Approved
 
-Version: 1.0
+Version: 1.1
 
 Purpose:
 
@@ -40,6 +40,8 @@ The new CV Engine 2.0 architecture is:
 ```txt
 GPT
 → CvJsonV1
+→ Validation
+→ Normalization
 → docx@8 Template Builder
 → DOCX
 ```
@@ -52,29 +54,33 @@ The purpose of this builder is to fully remove HTML/CSS responsibility from GPT 
 
 The DOCX Builder must be responsible for:
 
-- Page layout
-- Margins
-- Fonts
-- Font sizes
-- Section spacing
-- Section borders
-- Header layout
-- Bullet rendering
-- Dates styling
-- Section ordering
-- Arabic RTL rendering
-- DOCX export
+* Page layout
+* Margins
+* Fonts
+* Font sizes
+* Section spacing
+* Section borders
+* Header layout
+* Bullet rendering
+* Dates styling
+* Section ordering
+* Arabic RTL rendering
+* DOCX export
 
 The DOCX Builder must NOT be responsible for:
 
-- Generating CV content
-- Rewriting candidate experience
-- Creating ATS keywords
-- Translating text
-- Classifying candidate level
-- Inventing missing data
+* Generating CV content
+* Rewriting candidate experience
+* Creating ATS keywords
+* Translating text
+* Classifying candidate level
+* Inventing missing data
+* Parsing PDFs
+* Parsing Word documents
+* Parsing LinkedIn profiles
+* Mapping raw import payloads
 
-Content belongs to the GPT prompts.
+Content belongs to the GPT prompts and import mapping layers.
 
 Design and DOCX rendering belong to the DOCX Builder.
 
@@ -84,16 +90,16 @@ Design and DOCX rendering belong to the DOCX Builder.
 
 This phase must not change:
 
-- Frontend flow
-- Payment flow
-- Supabase schema
-- Storage logic
-- Paymob logic
-- WishMoney logic
-- SuccessPage
-- BuildingPage
-- User authentication
-- Existing production generation flow until the new builder is tested
+* Frontend flow
+* Payment flow
+* Supabase schema
+* Storage logic
+* Paymob logic
+* WishMoney logic
+* SuccessPage
+* BuildingPage
+* User authentication
+* Existing production generation flow until the new builder is tested
 
 ---
 
@@ -110,6 +116,10 @@ as the official schema source.
 The builder must accept only validated `CvJsonV1` data.
 
 The builder must not depend on GPT output directly without validation.
+
+The builder must not depend on raw import data from PDF, Word, LinkedIn, or manual form sources.
+
+All sources must be mapped into `CvJsonV1` before validation and rendering.
 
 ---
 
@@ -135,6 +145,54 @@ await buildCvDocx({
   },
 });
 ```
+
+---
+
+## Supported Input Sources
+
+All candidate data sources must be converted into `CvJsonV1` before reaching the DOCX Builder.
+
+Supported sources:
+
+* Manual Form Input
+* PDF Resume Import
+* Word Resume Import
+* LinkedIn Profile Import
+
+All import pipelines must map their extracted data into the official `CvJsonV1` schema.
+
+The DOCX Builder must never depend on:
+
+* Raw form payloads
+* Raw PDF parsing output
+* Raw DOCX parsing output
+* Raw LinkedIn data
+* Raw GPT output
+
+The DOCX Builder accepts only validated and normalized `CvJsonV1`.
+
+Pipeline:
+
+```txt
+Manual Form Input
+PDF Resume Import
+Word Resume Import
+LinkedIn Profile Import
+↓
+Mapping Layer
+↓
+CvJsonV1
+↓
+Validation
+↓
+Normalization
+↓
+DOCX Builder
+```
+
+The mapping layer is responsible for converting each source into the approved schema.
+
+The DOCX Builder is not responsible for fixing, guessing, or interpreting raw source data.
 
 ---
 
@@ -254,6 +312,16 @@ supabase/functions/generate-cv/
     validate-cv-json.ts
     validate-cover-letter-json.ts
 
+  normalizers/
+    normalize-cv-json.ts
+    normalize-cover-letter-json.ts
+
+  mappers/
+    map-form-to-cv-json.ts
+    map-pdf-import-to-cv-json.ts
+    map-word-import-to-cv-json.ts
+    map-linkedin-import-to-cv-json.ts
+
   docx/
     builders/
       build-cv-docx.ts
@@ -296,11 +364,20 @@ Do not place the full builder inside `index.ts`.
 
 `index.ts` should orchestrate the flow only.
 
+Import mappers should remain separate from the DOCX Builder.
+
 ---
 
 ## High-Level Pipeline
 
 ```txt
+Manual Form Input
+PDF Resume Import
+Word Resume Import
+LinkedIn Profile Import
+↓
+Mapping Layer
+↓
 CvJsonV1
 ↓
 validateCvJsonV1()
@@ -324,26 +401,44 @@ Upload to Supabase Storage
 
 The main builder function should:
 
-1. Validate the input shape.
-2. Normalize safe derived fields when needed.
-3. Determine language direction.
-4. Select the correct template strategy.
-5. Render sections in the correct order.
-6. Apply global DOCX styles.
-7. Generate the DOCX buffer.
-8. Return the buffer to the existing generation flow.
+1. Receive `CvJsonV1`.
+2. Validate the input shape.
+3. Stop immediately if validation fails.
+4. Use normalized data returned by the validator.
+5. Determine language direction.
+6. Select the correct template strategy.
+7. Render sections in the correct order.
+8. Apply global DOCX styles.
+9. Generate the DOCX buffer.
+10. Return the buffer to the existing generation flow.
 
 Example:
 
 ```ts
-export async function buildCvDocx(cv: CvJsonV1): Promise<Uint8Array> {
-  const validated = validateCvJsonV1(cv);
-  const normalized = normalizeCvJsonV1(validated);
+export async function buildCvDocx(
+  cv: CvJsonV1
+): Promise<Uint8Array> {
+  const result = validateCvJsonV1(cv);
+
+  if (!result.valid || !result.normalized) {
+    throw new Error(
+      `Invalid CvJsonV1: ${result.errors.join(", ")}`
+    );
+  }
+
+  const normalized = result.normalized;
+
   const template = selectCvTemplate(normalized);
+
   const document = template.build(normalized);
+
   return await Packer.toBuffer(document);
 }
 ```
+
+The builder must never call `normalizeCvJsonV1()` directly on raw GPT output or raw import payloads.
+
+Validation must happen first.
 
 ---
 
@@ -355,22 +450,26 @@ Normalization may only generate safe derived values from existing structured fie
 
 Allowed normalization:
 
-- Generate `contact_line` from existing `contact` fields if `contact_line` is empty.
-- Trim extra whitespace.
-- Remove empty separators.
-- Ensure arrays exist.
-- Ensure text fields exist as empty strings when missing.
+* Generate `contact_line` from existing `contact` fields if `contact_line` is empty.
+* Trim extra whitespace.
+* Remove empty separators.
+* Ensure arrays exist when safe.
+* Ensure text fields exist as empty strings when safe.
 
 Not allowed:
 
-- Inventing email
-- Inventing phone
-- Inventing LinkedIn
-- Inventing location
-- Inventing job titles
-- Inventing dates
-- Inventing education
-- Inventing achievements
+* Inventing email
+* Inventing phone
+* Inventing LinkedIn
+* Inventing location
+* Inventing nationality
+* Inventing job titles
+* Inventing dates
+* Inventing education
+* Inventing employers
+* Inventing responsibilities
+* Inventing achievements
+* Rewriting candidate content
 
 Example:
 
@@ -391,7 +490,7 @@ function normalizeCvJsonV1(cv: CvJsonV1): CvJsonV1 {
 
 `contact_line` is used by the Header Renderer.
 
-If `contact_line` is empty, generate it from:
+If `contact_line` is empty, generate it only from:
 
 ```ts
 cv.contact.email
@@ -402,11 +501,13 @@ cv.contact.location
 
 Rules:
 
-- Use only existing non-empty contact fields.
-- Preserve original values.
-- Do not invent missing values.
-- Do not include empty separators.
-- Recommended separator: ` | `
+* Use only existing non-empty contact fields.
+* Preserve original values.
+* Do not invent missing values.
+* Do not include empty separators.
+* Do not include nationality automatically.
+* Do not include birth information automatically.
+* Recommended separator: `|`
 
 Example:
 
@@ -419,7 +520,11 @@ function buildContactLine(contact: CvJsonV1["contact"]): string {
 }
 ```
 
-This protects PDF, Word, and LinkedIn imports where structured contact fields may exist but `contact_line` has not yet been generated.
+This protects manual form input, PDF imports, Word imports, and LinkedIn imports where structured contact fields may exist but `contact_line` has not yet been generated.
+
+`nationality` remains a separate schema field.
+
+If a future template intentionally wants to display nationality, it must do so explicitly through a renderer decision, not through automatic contact line generation.
 
 ---
 
@@ -427,8 +532,8 @@ This protects PDF, Word, and LinkedIn imports where structured contact fields ma
 
 Template selection must be based on:
 
-- `document_language`
-- `candidate_level`
+* `document_language`
+* `candidate_level`
 
 Do not use `template_type`.
 
@@ -469,10 +574,10 @@ A fresh graduate Arabic CV should not use the same section order as a profession
 
 Use for:
 
-- junior
-- mid
-- senior
-- executive
+* junior
+* mid
+* senior
+* executive
 
 Order:
 
@@ -491,7 +596,7 @@ Order:
 
 Use for:
 
-- fresh_graduate
+* fresh_graduate
 
 Order:
 
@@ -510,10 +615,10 @@ Order:
 
 Use for:
 
-- Arabic junior
-- Arabic mid
-- Arabic senior
-- Arabic executive
+* Arabic junior
+* Arabic mid
+* Arabic senior
+* Arabic executive
 
 Order:
 
@@ -528,11 +633,11 @@ Order:
 
 Arabic rendering rules:
 
-- RTL paragraph direction
-- Right alignment
-- Arabic-compatible font fallback
-- Arabic date text preserved
-- Arabic section titles
+* RTL paragraph direction
+* Right alignment
+* Arabic-compatible font fallback
+* Arabic date text preserved
+* Arabic section titles
 
 ---
 
@@ -540,7 +645,7 @@ Arabic rendering rules:
 
 Use for:
 
-- Arabic fresh_graduate
+* Arabic fresh_graduate
 
 Order:
 
@@ -555,11 +660,11 @@ Order:
 
 Arabic rendering rules:
 
-- RTL paragraph direction
-- Right alignment
-- Arabic-compatible font fallback
-- Arabic date text preserved
-- Arabic section titles
+* RTL paragraph direction
+* Right alignment
+* Arabic-compatible font fallback
+* Arabic date text preserved
+* Arabic section titles
 
 ---
 
@@ -585,13 +690,14 @@ if (cv.certifications.length > 0) {
 
 ### Page
 
-- Size: A4
-- Orientation: Portrait
-- Margins:
-  - Top: 0.6 inch
-  - Bottom: 0.6 inch
-  - Left: 0.65 inch
-  - Right: 0.65 inch
+* Size: A4
+* Orientation: Portrait
+* Margins:
+
+  * Top: 0.6 inch
+  * Bottom: 0.6 inch
+  * Left: 0.65 inch
+  * Right: 0.65 inch
 
 ---
 
@@ -599,12 +705,12 @@ if (cv.certifications.length > 0) {
 
 Primary English font:
 
-- Calibri
+* Calibri
 
 Primary Arabic font:
 
-- Arial
-- Arial Unicode MS fallback if available
+* Arial
+* Arial Unicode MS fallback if available
 
 Do not use decorative fonts.
 
@@ -614,31 +720,31 @@ Do not use decorative fonts.
 
 Name:
 
-- 24pt
-- Bold
+* 24pt
+* Bold
 
 Contact line:
 
-- 10pt
+* 10pt
 
 Section headers:
 
-- 11pt
-- Bold
+* 11pt
+* Bold
 
 Body text:
 
-- 10pt
+* 10pt
 
 Bullet text:
 
-- 10pt
+* 10pt
 
 Dates:
 
-- 10pt
-- Italic for English
-- Regular or italic-safe style for Arabic depending on DOCX output quality
+* 10pt
+* Italic for English
+* Regular or italic-safe style for Arabic depending on DOCX output quality
 
 ---
 
@@ -648,9 +754,9 @@ Use black and dark gray only.
 
 Recommended:
 
-- Main text: black
-- Secondary text: dark gray
-- Borders: dark gray
+* Main text: black
+* Secondary text: dark gray
+* Borders: dark gray
 
 No bright colors.
 
@@ -662,14 +768,14 @@ No graphics.
 
 ### Layout
 
-- Single column
-- ATS-safe
-- No tables for the main content unless absolutely necessary
-- No text boxes
-- No floating elements
-- No images
-- No icons
-- No multi-column layouts
+* Single column
+* ATS-safe
+* No tables for the main content unless absolutely necessary
+* No text boxes
+* No floating elements
+* No images
+* No icons
+* No multi-column layouts
 
 ---
 
@@ -687,30 +793,37 @@ nationality
 
 Output:
 
-- Candidate name
-- Contact line
+* Candidate name
+* Contact line
 
 Rules:
 
-- Render full name at the top.
-- Render contact line under the name.
-- If `contact_line` is empty, generate it from `contact`.
-- Do not render empty contact values.
-- Do not render nationality unless intentionally included in `contact_line`.
-- Keep header simple and ATS-safe.
+* Render full name at the top.
+* Render contact line under the name.
+* If `contact_line` is empty, generate it from `contact`.
+* Do not render empty contact values.
+* Do not automatically add nationality to `contact_line`.
+* Do not automatically add birth information to `contact_line`.
+* Keep header simple and ATS-safe.
 
 English alignment:
 
-- Center or left aligned.
+* Center or left aligned.
 
 Arabic alignment:
 
-- Right aligned.
+* Right aligned.
 
 Recommended initial decision:
 
-- English: centered header
-- Arabic: right-aligned header
+* English: centered header
+* Arabic: right-aligned header
+
+Nationality rule:
+
+`nationality` is available as a separate field for future template decisions.
+
+The header renderer must not display nationality unless a specific template intentionally supports it.
 
 ---
 
@@ -720,32 +833,32 @@ All section titles should use real DOCX formatting, not text symbols.
 
 Rules:
 
-- Bold
-- 11pt
-- Uppercase for English section names if desired
-- Arabic section names must not be forced uppercase
-- Bottom border using DOCX paragraph border
-- Spacing after title
+* Bold
+* 11pt
+* Uppercase for English section names if desired
+* Arabic section names must not be forced uppercase
+* Bottom border using DOCX paragraph border
+* Spacing after title
 
 English examples:
 
-- PROFESSIONAL SUMMARY
-- CORE COMPETENCIES
-- PROFESSIONAL EXPERIENCE
-- EDUCATION
-- CERTIFICATIONS
-- PROJECTS
-- LANGUAGES
+* PROFESSIONAL SUMMARY
+* CORE COMPETENCIES
+* PROFESSIONAL EXPERIENCE
+* EDUCATION
+* CERTIFICATIONS
+* PROJECTS
+* LANGUAGES
 
 Arabic examples:
 
-- الملخص المهني
-- الكفاءات الأساسية
-- الخبرات المهنية
-- التعليم
-- الشهادات
-- المشاريع
-- اللغات
+* الملخص المهني
+* الكفاءات الأساسية
+* الخبرات المهنية
+* التعليم
+* الشهادات
+* المشاريع
+* اللغات
 
 ---
 
@@ -759,11 +872,11 @@ summary: string
 
 Rules:
 
-- Render only if summary is not empty.
-- Body font size 10pt.
-- Normal paragraph spacing.
-- No bullets.
-- No bold inside summary.
+* Render only if summary is not empty.
+* Body font size 10pt.
+* Normal paragraph spacing.
+* No bullets.
+* No bold inside summary.
 
 ---
 
@@ -797,10 +910,10 @@ Arabic rendering:
 
 Rules:
 
-- Render only groups with at least one item.
-- Do not create empty labels.
-- Keep as simple text lines for ATS safety.
-- Do not use multi-column skill pills.
+* Render only groups with at least one item.
+* Do not create empty labels.
+* Keep as simple text lines for ATS safety.
+* Do not use multi-column skill pills.
 
 ---
 
@@ -832,12 +945,12 @@ Location | Date Range
 
 Rules:
 
-- Preserve job title exactly from JSON.
-- Preserve company name exactly from JSON.
-- Dates should be visually distinct.
-- Bullets must use real DOCX bullets.
-- Do not render empty location/date separators.
-- Keep each role compact but readable.
+* Preserve job title exactly from JSON.
+* Preserve company name exactly from JSON.
+* Dates should be visually distinct.
+* Bullets must use real DOCX bullets.
+* Do not render empty location/date separators.
+* Keep each role compact but readable.
 
 ---
 
@@ -890,14 +1003,14 @@ GPA: value
 
 Rules:
 
-- Do not render `in Major` if major is empty.
-- Do not render GPA if empty.
-- Preserve institution name.
-- Preserve degree and major.
+* Do not render `in Major` if major is empty.
+* Do not render GPA if empty.
+* Preserve institution name.
+* Preserve degree and major.
 
 Arabic labels:
 
-- المعدل: value
+* المعدل: value
 
 ---
 
@@ -917,9 +1030,9 @@ Certification Name — Issuer — Date
 
 Rules:
 
-- Do not render empty separators.
-- Preserve certification name exactly.
-- Do not invent issuer or date.
+* Do not render empty separators.
+* Preserve certification name exactly.
+* Do not invent issuer or date.
 
 ---
 
@@ -940,9 +1053,9 @@ Each project should render:
 
 Rules:
 
-- Useful especially for fresh graduates.
-- Do not render empty project descriptions.
-- Use bullets only if bullets exist.
+* Useful especially for fresh graduates.
+* Do not render empty project descriptions.
+* Use bullets only if bullets exist.
 
 ---
 
@@ -970,9 +1083,9 @@ Arabic rendering:
 
 Rules:
 
-- Render only explicitly provided languages.
-- Do not infer languages.
-- Do not render empty language levels unless needed.
+* Render only explicitly provided languages.
+* Do not infer languages.
+* Do not render empty language levels unless needed.
 
 ---
 
@@ -982,12 +1095,12 @@ Arabic DOCX rendering must be treated as a separate layout concern.
 
 Rules:
 
-- Use RTL paragraph direction.
-- Use right alignment.
-- Use Arabic-compatible font.
-- Do not rely on browser CSS.
-- Do not use HTML direction attributes.
-- Use DOCX paragraph options only.
+* Use RTL paragraph direction.
+* Use right alignment.
+* Use Arabic-compatible font.
+* Do not rely on browser CSS.
+* Do not use HTML direction attributes.
+* Use DOCX paragraph options only.
 
 Expected helper:
 
@@ -1009,16 +1122,16 @@ Arabic section titles must also be RTL and right-aligned.
 
 Create reusable helpers for:
 
-- Paragraph spacing
-- Text runs
-- Bold text
-- Italic text
-- Section borders
-- Bullets
-- RTL paragraphs
-- Empty value filtering
-- Safe separators
-- Contact line generation
+* Paragraph spacing
+* Text runs
+* Bold text
+* Italic text
+* Section borders
+* Bullets
+* RTL paragraphs
+* Empty value filtering
+* Safe separators
+* Contact line generation
 
 Example helpers:
 
@@ -1037,11 +1150,11 @@ buildContactLine(contact)
 
 Never render:
 
-- Empty strings
-- Empty bullet lists
-- Empty section titles
-- Empty separators
-- Placeholder text
+* Empty strings
+* Empty bullet lists
+* Empty section titles
+* Empty separators
+* Placeholder text
 
 Example:
 
@@ -1067,18 +1180,36 @@ validateCvJsonV1(cv)
 
 Validation must check:
 
-- Required root keys exist
-- `document_language` is valid
-- `candidate_level` is valid
-- `contact` object exists
-- `contact.email` exists as a string
-- `contact.phone` exists as a string
-- `contact.linkedin` exists as a string
-- `contact.location` exists as a string
-- Arrays exist
-- Core competency groups exist
-- No HTML strings
-- No placeholder values
+* Required root keys exist
+* `document_language` is valid
+* `candidate_level` is valid
+* `contact` object exists
+* `contact.email` exists as a string
+* `contact.phone` exists as a string
+* `contact.linkedin` exists as a string
+* `contact.location` exists as a string
+* Arrays exist
+* Core competency groups exist
+* No HTML strings
+* No CSS-like strings
+* No HTML entities
+* No markdown code fences
+* No placeholder values
+* Import-generated data has already been mapped to `CvJsonV1`
+* Builder rejects raw import payloads
+* Builder rejects raw GPT output that has not passed validation
+
+Validation must return a structured result:
+
+```ts
+type ValidationResult = {
+  valid: boolean;
+  errors: string[];
+  normalized?: CvJsonV1;
+};
+```
+
+The builder must use `normalized` only when `valid === true`.
 
 ---
 
@@ -1102,20 +1233,24 @@ Do not connect GPT until these static DOCX tests pass.
 
 The generated DOCX must be checked for:
 
-- Opens in Microsoft Word
-- Opens in Google Docs
-- ATS-safe single-column structure
-- Correct section order
-- Proper spacing
-- Header readability
-- Section borders
-- Bullet indentation
-- No broken separators
-- No empty sections
-- No missing contact fields
-- Arabic RTL correctness
-- Arabic right alignment
-- Download/upload flow compatibility
+* Opens in Microsoft Word
+* Opens in Google Docs
+* ATS-safe single-column structure
+* Correct section order
+* Proper spacing
+* Header readability
+* Section borders
+* Bullet indentation
+* No broken separators
+* No empty sections
+* No missing contact fields
+* Arabic RTL correctness
+* Arabic right alignment
+* Download/upload flow compatibility
+* Manual form input compatibility
+* PDF import compatibility after mapping
+* Word import compatibility after mapping
+* LinkedIn import compatibility after mapping
 
 ---
 
@@ -1138,7 +1273,7 @@ Existing HTML → html-to-docx flow remains active.
 When enabled:
 
 ```txt
-GPT → CvJsonV1 → docx@8 builder → DOCX
+GPT → CvJsonV1 → Validation → Normalization → docx@8 builder → DOCX
 ```
 
 This protects production while testing CV Engine 2.0.
@@ -1179,6 +1314,10 @@ Step 8:
 
 Replace old HTML pipeline only after successful testing.
 
+Import flows must be added only after the core CvJsonV1 builder is stable.
+
+PDF, Word, and LinkedIn imports must map into CvJsonV1 before using the same validation, normalization, and DOCX builder pipeline.
+
 ---
 
 ## Cover Letter Compatibility
@@ -1188,6 +1327,8 @@ The same architecture should later be reused for Cover Letter Engine 2.0:
 ```txt
 GPT
 → Structured Cover Letter JSON
+→ Validation
+→ Normalization
 → docx@8 Cover Letter Builder
 → DOCX
 ```
@@ -1195,6 +1336,34 @@ GPT
 Do not mix CV builder and cover letter builder in the same file.
 
 Use shared style helpers where appropriate.
+
+Future cover letter systems may reuse:
+
+* Validation patterns
+* Normalization patterns
+* DOCX style helpers
+* Text utilities
+* Language direction helpers
+
+But the Cover Letter Builder must remain separate from the CV Builder.
+
+---
+
+## Future System Compatibility
+
+The following future systems must map through or depend on `CvJsonV1`:
+
+* ATS Analysis
+* Career Score
+* AI Job Match
+* Cover Letter Engine
+* PDF Resume Import
+* Word Resume Import
+* LinkedIn Profile Import
+
+These systems must not create separate CV schemas unless a future version is explicitly approved.
+
+`CvJsonV1` remains the shared foundation for CV content, imports, analysis, matching, and document generation.
 
 ---
 
@@ -1232,6 +1401,16 @@ Then:
 Cover Letter DOCX Builder
 ```
 
+Then future import pipelines:
+
+```txt
+PDF Import
+Word Import
+LinkedIn Import
+```
+
+Import pipelines must not bypass CvJsonV1 validation and normalization.
+
 ---
 
 ## Implementation Order
@@ -1239,29 +1418,35 @@ Cover Letter DOCX Builder
 1. Create `CV_DOCX_TYPES_AND_VALIDATOR.md`.
 2. Create TypeScript types for CvJsonV1.
 3. Create validator for CvJsonV1.
-4. Create static sample JSON files.
-5. Create DOCX style helpers.
-6. Create section title renderer.
-7. Create header renderer.
-8. Create summary renderer.
-9. Create core competencies renderer.
-10. Create experience renderer.
-11. Create education renderer.
-12. Create certifications renderer.
-13. Create projects renderer.
-14. Create languages renderer.
-15. Create Professional template.
-16. Test Professional template with static JSON.
-17. Create Fresh Graduate section ordering.
-18. Test Fresh Graduate template with static JSON.
-19. Create Arabic RTL helpers.
-20. Create Arabic Professional template.
-21. Test Arabic Professional template with static JSON.
-22. Create Arabic Fresh Graduate template.
-23. Test Arabic Fresh Graduate template with static JSON.
-24. Connect GPT JSON output.
-25. Enable feature flag.
-26. Replace old HTML pipeline after full QA.
+4. Create normalizer for CvJsonV1.
+5. Create static sample JSON files.
+6. Create DOCX style helpers.
+7. Create section title renderer.
+8. Create header renderer.
+9. Create summary renderer.
+10. Create core competencies renderer.
+11. Create experience renderer.
+12. Create education renderer.
+13. Create certifications renderer.
+14. Create projects renderer.
+15. Create languages renderer.
+16. Create Professional template.
+17. Test Professional template with static JSON.
+18. Create Fresh Graduate section ordering.
+19. Test Fresh Graduate template with static JSON.
+20. Create Arabic RTL helpers.
+21. Create Arabic Professional template.
+22. Test Arabic Professional template with static JSON.
+23. Create Arabic Fresh Graduate template.
+24. Test Arabic Fresh Graduate template with static JSON.
+25. Connect GPT JSON output.
+26. Validate GPT JSON output before DOCX rendering.
+27. Enable feature flag.
+28. Replace old HTML pipeline after full QA.
+29. Add PDF import mapping to CvJsonV1.
+30. Add Word import mapping to CvJsonV1.
+31. Add LinkedIn import mapping to CvJsonV1.
+32. Test all import sources through the same CvJsonV1 pipeline.
 
 ---
 
@@ -1269,12 +1454,12 @@ Cover Letter DOCX Builder
 
 DOCX Builder Architecture is ready for implementation planning.
 
-Next file to create:
+Next file to update:
 
 ```txt
-CV_DOCX_TYPES_AND_VALIDATOR.md
+CV_JSON_SAMPLE_OUTPUTS.md
 ```
 
 Purpose:
 
-Define TypeScript types, validation rules, static sample JSON requirements, and safety checks before writing the DOCX template code.
+Fix invalid JSON samples and make sure all sample outputs follow the official CvJsonV1 schema before using them as static test data.

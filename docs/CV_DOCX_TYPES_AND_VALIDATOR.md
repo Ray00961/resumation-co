@@ -2,7 +2,7 @@
 
 Status: Ready For Implementation
 
-Version: 1.0
+Version: 1.1
 
 Purpose:
 
@@ -11,6 +11,8 @@ Defines the TypeScript contract, validation layer, normalization layer, and safe
 This document must be implemented before any DOCX template code is written.
 
 The DOCX Builder must never receive raw GPT output.
+
+The DOCX Builder must never receive raw import payloads from PDF, Word, LinkedIn, or manual form sources.
 
 The DOCX Builder must only receive validated and normalized CvJsonV1 data.
 
@@ -25,9 +27,55 @@ This document depends on:
 
 No type definitions may conflict with the official CvJsonV1 specification.
 
+All future input sources must map into CvJsonV1 before validation, normalization, and DOCX rendering.
+
+Supported future input sources:
+
+* Manual form input
+* PDF resume import
+* Word resume import
+* LinkedIn profile import
+
 ---
 
 # Core TypeScript Types
+
+## DocumentLanguage
+
+```ts
+export type DocumentLanguage = "en" | "ar";
+```
+
+---
+
+## CandidateLevel
+
+```ts
+export type CandidateLevel =
+  | "fresh_graduate"
+  | "junior"
+  | "mid"
+  | "senior"
+  | "executive";
+```
+
+---
+
+## Allowed Values
+
+```ts
+export const allowedDocumentLanguages = ["en", "ar"] as const;
+
+export const allowedCandidateLevels = [
+  "fresh_graduate",
+  "junior",
+  "mid",
+  "senior",
+  "executive",
+] as const;
+```
+
+---
 
 ## ContactInfo
 
@@ -123,14 +171,9 @@ export interface LanguageItem {
 
 ```ts
 export interface CvJsonV1 {
-  document_language: "en" | "ar";
+  document_language: DocumentLanguage;
 
-  candidate_level:
-    | "fresh_graduate"
-    | "junior"
-    | "mid"
-    | "senior"
-    | "executive";
+  candidate_level: CandidateLevel;
 
   full_name: string;
 
@@ -173,6 +216,19 @@ en
 ar
 ```
 
+Reject anything else.
+
+Examples:
+
+```txt
+english
+arabic
+EN
+AR
+```
+
+must fail validation.
+
 ---
 
 ## candidate_level
@@ -187,6 +243,8 @@ senior
 executive
 ```
 
+Reject anything else.
+
 ---
 
 # Validation Result
@@ -199,6 +257,13 @@ export interface ValidationResult {
 }
 ```
 
+Rules:
+
+* `valid` must be `true` only when all validation checks pass.
+* `errors` must contain clear path-based validation messages.
+* `normalized` must exist only when `valid === true`.
+* The DOCX Builder must use `normalized` only after checking `valid === true`.
+
 ---
 
 # Root Validator
@@ -206,17 +271,21 @@ export interface ValidationResult {
 Function:
 
 ```ts
-validateCvJsonV1(cv)
+validateCvJsonV1(input: unknown): ValidationResult
 ```
 
 Responsibilities:
 
-* Validate structure.
+* Validate root object.
 * Validate required keys.
 * Validate allowed values.
+* Validate contact object.
+* Validate core competencies object.
 * Validate array shapes.
 * Validate item structures.
-* Validate safety rules.
+* Validate string safety rules.
+* Reject raw import payloads that are not mapped to CvJsonV1.
+* Reject raw GPT output that does not match CvJsonV1.
 * Return normalized data when valid.
 
 ---
@@ -252,6 +321,10 @@ languages
 All keys must exist.
 
 Missing keys must generate validation errors.
+
+Null root fields are invalid.
+
+Undefined root fields are invalid.
 
 ---
 
@@ -295,6 +368,28 @@ Reject anything else.
 
 ---
 
+# Root String Field Validation
+
+The following root fields must exist and must be strings:
+
+```txt
+full_name
+contact_line
+target_job
+nationality
+summary
+```
+
+Rules:
+
+* Empty string is allowed.
+* Null is not allowed.
+* Undefined is not allowed.
+* Non-string values are invalid.
+* Unsafe strings are invalid.
+
+---
+
 # Contact Validation
 
 Required object:
@@ -315,14 +410,24 @@ location
 Validation rules:
 
 * Must exist.
-* Must be strings.
+* Must be an object.
+* Must not be null.
+* All fields must exist.
+* All fields must be strings.
 * Empty string allowed.
 * Null not allowed.
 * Undefined not allowed.
+* Unsafe strings are invalid.
 
 ---
 
 # Core Competencies Validation
+
+Required object:
+
+```ts
+core_competencies
+```
 
 Required groups:
 
@@ -335,9 +440,16 @@ professional_skills
 Rules:
 
 * Must exist.
-* Must be arrays.
+* Must be an object.
+* Must not be null.
+* Groups must exist.
+* Groups must be arrays.
 * Empty arrays allowed.
 * Null not allowed.
+* Undefined not allowed.
+* Array items must be strings.
+* Unsafe strings are invalid.
+* Duplicate prevention is preferred but not required in V1.
 
 ---
 
@@ -354,9 +466,13 @@ projects
 languages
 ```
 
-Null is invalid.
+Rules:
 
-Undefined is invalid.
+* Empty arrays are allowed.
+* Null is invalid.
+* Undefined is invalid.
+* Non-array values are invalid.
+* Items must match their required item structure.
 
 ---
 
@@ -376,6 +492,16 @@ Required shape:
 }
 ```
 
+Rules:
+
+* All keys must exist.
+* String fields may be empty strings.
+* Null is invalid.
+* Undefined is invalid.
+* `bullets` must be an array.
+* Bullet items must be strings.
+* Unsafe strings are invalid.
+
 ---
 
 ## validateEducationItem
@@ -393,6 +519,14 @@ Required shape:
 }
 ```
 
+Rules:
+
+* All keys must exist.
+* String fields may be empty strings.
+* Null is invalid.
+* Undefined is invalid.
+* Unsafe strings are invalid.
+
 ---
 
 ## validateCertificationItem
@@ -406,6 +540,14 @@ Required shape:
   date: string;
 }
 ```
+
+Rules:
+
+* All keys must exist.
+* String fields may be empty strings.
+* Null is invalid.
+* Undefined is invalid.
+* Unsafe strings are invalid.
 
 ---
 
@@ -422,6 +564,16 @@ Required shape:
 }
 ```
 
+Rules:
+
+* All keys must exist.
+* String fields may be empty strings.
+* Null is invalid.
+* Undefined is invalid.
+* `bullets` must be an array.
+* Bullet items must be strings.
+* Unsafe strings are invalid.
+
 ---
 
 ## validateLanguageItem
@@ -435,13 +587,27 @@ Required shape:
 }
 ```
 
+Rules:
+
+* All keys must exist.
+* String fields may be empty strings.
+* Null is invalid.
+* Undefined is invalid.
+* Unsafe strings are invalid.
+
 ---
 
 # Safety Validation
 
-The validator must reject:
+The validator must reject unsafe content anywhere inside strings.
+
+This includes root strings, contact strings, competency items, item fields, and bullet text.
+
+---
 
 ## HTML
+
+Reject HTML tags.
 
 Examples:
 
@@ -449,48 +615,110 @@ Examples:
 <div>
 <p>
 <span>
+<br>
+<table>
 ```
 
 ---
 
 ## CSS
 
+Reject CSS-like strings.
+
 Examples:
 
 ```css
 color:red;
 font-size:12px;
+text-transform: uppercase;
+font-weight: bold;
+line-height: 1.4;
+letter-spacing: 1px;
+text-align: center;
+margin-top: 10px;
+padding: 12px;
+border-bottom: 1px solid black;
+display: flex;
+position: absolute;
+width: 100%;
+height: auto;
+```
+
+CSS-like detection should include at least:
+
+```txt
+color
+font-size
+font-weight
+font-family
+text-transform
+text-align
+line-height
+letter-spacing
+margin
+margin-top
+margin-bottom
+margin-left
+margin-right
+padding
+padding-top
+padding-bottom
+padding-left
+padding-right
+background
+background-color
+border
+border-top
+border-bottom
+border-left
+border-right
+display
+position
+width
+height
+white-space
 ```
 
 ---
 
 ## HTML Entities
 
+Reject HTML entities.
+
 Examples:
 
 ```txt
 &lt;
 &gt;
+&amp;
+&quot;
+&apos;
 ```
 
 ---
 
 ## Markdown Fences
 
+Reject markdown code fences.
+
 Examples:
 
-````
+````txt
 ```html
-````
+```
 
 ```css
 ```
 
+```json
+```
 ````
 
 ---
 
 ## Placeholder Values
+
+Reject placeholder values.
 
 Examples:
 
@@ -501,7 +729,19 @@ Lorem Ipsum
 Coming Soon
 Example Company
 Example Name
-````
+Sample Company
+Sample Name
+Your Name
+Your Email
+your.email@example.com
+example@example.com
+```
+
+Note:
+
+Testing fixtures may intentionally use clearly fake sample data, but production validation should reject placeholder values.
+
+If test fixtures need placeholder-like values, they must be realistic enough to avoid matching the placeholder list.
 
 ---
 
@@ -530,12 +770,18 @@ Invalid.
 Function:
 
 ```ts
-normalizeCvJsonV1(cv)
+normalizeCvJsonV1(cv: CvJsonV1): CvJsonV1
 ```
 
 Purpose:
 
 Produce safe builder-ready data without inventing information.
+
+Normalization must happen only after validation succeeds.
+
+The normalizer must not be used directly on raw GPT output.
+
+The normalizer must not be used directly on raw PDF, Word, LinkedIn, or form payloads.
 
 ---
 
@@ -557,6 +803,38 @@ becomes:
 
 ---
 
+## Trim String Arrays
+
+Example:
+
+```txt
+[" React ", " SQL "]
+```
+
+becomes:
+
+```txt
+["React", "SQL"]
+```
+
+---
+
+## Remove Empty String Array Items
+
+Example:
+
+```txt
+["React", "", "SQL"]
+```
+
+becomes:
+
+```txt
+["React", "SQL"]
+```
+
+---
+
 ## Ensure Arrays Exist
 
 Example:
@@ -571,7 +849,9 @@ becomes:
 []
 ```
 
-when safe.
+only when safe and only after validation rules allow that behavior.
+
+For strict CvJsonV1 validation, missing required root arrays should still produce validation errors.
 
 ---
 
@@ -589,7 +869,9 @@ becomes:
 ""
 ```
 
-when safe.
+only when safe and only inside controlled normalization after validation.
+
+For strict CvJsonV1 validation, missing required root string keys should still produce validation errors.
 
 ---
 
@@ -601,13 +883,23 @@ Allowed only when:
 contact_line === ""
 ```
 
-Generate from:
+Generate only from:
 
 ```txt
 contact.email
 contact.phone
 contact.linkedin
 contact.location
+```
+
+Do not generate contact_line from:
+
+```txt
+nationality
+date of birth
+target_job
+summary
+any inferred value
 ```
 
 ---
@@ -635,14 +927,26 @@ The normalizer must never:
 * Invent contact details.
 * Invent dates.
 * Invent locations.
+* Invent nationality.
 * Invent education.
 * Invent employers.
 * Invent responsibilities.
 * Invent achievements.
 * Invent certifications.
+* Invent skills.
 * Rewrite candidate content.
+* Translate candidate content.
+* Classify candidate level.
+* Add ATS keywords.
+* Parse raw PDF content.
+* Parse raw Word content.
+* Parse raw LinkedIn content.
 
 Content generation belongs to GPT.
+
+Import interpretation belongs to import mapping layers.
+
+DOCX rendering belongs to the DOCX Builder.
 
 ---
 
@@ -651,7 +955,7 @@ Content generation belongs to GPT.
 Function:
 
 ```ts
-buildContactLine(contact)
+buildContactLine(contact: ContactInfo): string
 ```
 
 Input:
@@ -669,17 +973,21 @@ email | phone | linkedin | location
 Rules:
 
 * Preserve original values.
+* Trim extra whitespace.
 * Skip empty values.
 * Use:
 
 ```txt
- |
+ | 
 ```
 
 as separator.
 
 * No duplicate separators.
+* No leading separators.
 * No trailing separators.
+* Do not include nationality automatically.
+* Do not include birth information automatically.
 
 ---
 
@@ -708,6 +1016,17 @@ ahmed@example.com | +20 1000000000
 
 Example 2
 
+Input:
+
+```json
+{
+  "email": "ahmed@example.com",
+  "phone": "+20 1000000000",
+  "linkedin": "",
+  "location": "Cairo, Egypt"
+}
+```
+
 Output:
 
 ```txt
@@ -718,6 +1037,17 @@ ahmed@example.com | +20 1000000000 | Cairo, Egypt
 
 Example 3
 
+Input:
+
+```json
+{
+  "email": "ahmed@example.com",
+  "phone": "+20 1000000000",
+  "linkedin": "linkedin.com/in/ahmed",
+  "location": "Cairo, Egypt"
+}
+```
+
 Output:
 
 ```txt
@@ -726,21 +1056,70 @@ ahmed@example.com | +20 1000000000 | linkedin.com/in/ahmed | Cairo, Egypt
 
 ---
 
-# Validation Flow
+# Import Source Compatibility
+
+Future input sources must map into CvJsonV1 before reaching the validator and builder.
+
+Supported sources:
+
+* Manual form input
+* PDF resume import
+* Word resume import
+* LinkedIn profile import
+
+Allowed import pipeline:
 
 ```txt
-Raw GPT JSON
+Raw Source Data
+↓
+Import Mapping Layer
+↓
+CvJsonV1
 ↓
 validateCvJsonV1()
 ↓
 normalizeCvJsonV1()
 ↓
+DOCX Builder
+```
+
+The validator must reject raw payloads that do not match the CvJsonV1 shape.
+
+The DOCX Builder must never receive:
+
+* Raw form payloads
+* Raw PDF extraction output
+* Raw Word extraction output
+* Raw LinkedIn profile payloads
+* Raw GPT responses
+
+---
+
+# Validation Flow
+
+```txt
+Raw GPT JSON
+Raw Form Mapping Output
+Raw PDF Mapping Output
+Raw Word Mapping Output
+Raw LinkedIn Mapping Output
+↓
 CvJsonV1
+↓
+validateCvJsonV1()
+↓
+normalizeCvJsonV1()
+↓
+Validated + Normalized CvJsonV1
 ↓
 DOCX Builder
 ```
 
 No renderer should run before validation succeeds.
+
+No template should receive unvalidated data.
+
+No builder should normalize raw data without validation first.
 
 ---
 
@@ -761,6 +1140,92 @@ arabic-fresh-graduate-cv.sample.json
 ```
 
 Validator must pass all fixtures before DOCX rendering begins.
+
+Fixtures must include:
+
+* Professional English candidate
+* Fresh graduate English candidate
+* Professional Arabic candidate
+* Fresh graduate Arabic candidate
+* Empty optional fields
+* Empty arrays
+* Contact line generated from contact fields
+* Location present in `contact.location`
+* Nationality separate from `contact_line`
+* No invalid JSON
+* No placeholder values that production validation would reject
+
+---
+
+# Required Tests
+
+## Type Tests
+
+Confirm that:
+
+* CvJsonV1 accepts only approved `document_language` values.
+* CvJsonV1 accepts only approved `candidate_level` values.
+* Education requires `major`.
+* Education requires `gpa`.
+* Contact requires `location`.
+* All root arrays exist.
+
+---
+
+## Validator Tests
+
+Validator must reject:
+
+* Missing root keys
+* Invalid `document_language`
+* Invalid `candidate_level`
+* Null root fields
+* Undefined root fields
+* Missing contact object
+* Missing contact fields
+* Missing core competency groups
+* Non-array section fields
+* Invalid item structures
+* HTML strings
+* CSS-like strings
+* HTML entities
+* Markdown fences
+* Placeholder values
+* Raw import payloads that are not CvJsonV1
+
+Validator must accept:
+
+* Empty strings for missing text values
+* Empty arrays for missing sections
+* Empty contact fields as strings
+* Valid English CvJsonV1
+* Valid Arabic CvJsonV1
+
+---
+
+## Normalizer Tests
+
+Normalizer must:
+
+* Trim root strings.
+* Trim contact strings.
+* Trim item strings.
+* Trim string array items.
+* Remove empty string array items.
+* Generate `contact_line` from contact fields when empty.
+* Remove empty contact separators.
+* Preserve existing `contact_line` when non-empty.
+* Preserve all candidate content without rewriting.
+
+Normalizer must not:
+
+* Invent missing values.
+* Add nationality to `contact_line`.
+* Add birth information to `contact_line`.
+* Translate text.
+* Rewrite bullets.
+* Add skills.
+* Add achievements.
 
 ---
 
@@ -784,6 +1249,10 @@ Validator must pass all fixtures before DOCX rendering begins.
 The DOCX Builder must never receive:
 
 * Raw GPT output
+* Raw form payloads
+* Raw PDF extraction output
+* Raw Word extraction output
+* Raw LinkedIn profile payloads
 * Invalid JSON
 * Partially validated JSON
 * Null root fields
@@ -796,7 +1265,7 @@ CvJsonV1
 
 that has successfully passed:
 
-```ts
+```txt
 validateCvJsonV1()
 normalizeCvJsonV1()
 ```
