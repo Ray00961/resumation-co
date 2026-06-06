@@ -1,157 +1,67 @@
-import {
-  AlignmentType,
-  Paragraph,
-  TextRun,
-} from "npm:docx@9.7.1";
-import type { ExperienceItem } from "../../schemas/cv-json-v1.ts";
-import {
-  COLOR,
-  FONT_SIZE,
-  INDENT,
-  SPACING,
-  getPrimaryFont,
-  type CvDocxLanguage,
-} from "../styles/cv-docx-styles.ts";
-import {
-  cleanText,
-  cleanTextArray,
-  joinNonEmpty,
-} from "../utils/text-utils.ts";
+import { AlignmentType, Paragraph, TextRun } from "https://esm.sh/docx@8.5.0";
+import type { CvJsonV1, ExperienceItem } from "../../schemas/cv-json-v1.ts";
+import { renderSectionTitle } from "./render-section-title.ts";
+import { FONT_SIZE, FONT, SPACING } from "../styles/cv-docx-styles.ts";
 
-function renderRoleHeader(
-  item: ExperienceItem,
-  language: CvDocxLanguage
-): Paragraph[] {
-  const isArabic = language === "ar";
-
-  const titleCompanyLine = joinNonEmpty(
-    [item.job_title, item.company],
-    " | "
-  );
-
-  const locationDateLine = joinNonEmpty(
-    [item.location, item.date_range],
-    " | "
-  );
-
-  const paragraphs: Paragraph[] = [];
-
-  if (titleCompanyLine !== "") {
-    paragraphs.push(
-      new Paragraph({
-        alignment: isArabic ? AlignmentType.RIGHT : AlignmentType.LEFT,
-        bidirectional: isArabic,
-        spacing: {
-          after: 60,
-        },
-        children: [
-          new TextRun({
-            text: titleCompanyLine,
-            bold: true,
-            size: FONT_SIZE.body,
-            color: COLOR.mainText,
-            font: getPrimaryFont(language),
-          }),
-        ],
-      })
-    );
-  }
-
-  if (locationDateLine !== "") {
-    paragraphs.push(
-      new Paragraph({
-        alignment: isArabic ? AlignmentType.RIGHT : AlignmentType.LEFT,
-        bidirectional: isArabic,
-        spacing: {
-          after: 80,
-        },
-        children: [
-          new TextRun({
-            text: locationDateLine,
-            italics: language === "en",
-            size: FONT_SIZE.date,
-            color: COLOR.secondaryText,
-            font: getPrimaryFont(language),
-          }),
-        ],
-      })
-    );
-  }
-
-  return paragraphs;
+function joinNonEmpty(vals: string[], sep = " | ") {
+  return vals.filter((v) => v?.trim()).join(sep);
 }
 
-function renderBullet(
-  text: string,
-  language: CvDocxLanguage
-): Paragraph {
-  const isArabic = language === "ar";
+function renderRole(item: ExperienceItem, isAr: boolean): Paragraph[] {
+  const font = isAr ? FONT.ar : FONT.en;
+  const align = isAr ? AlignmentType.RIGHT : AlignmentType.LEFT;
+  const paras: Paragraph[] = [];
 
-  return new Paragraph({
-    alignment: isArabic ? AlignmentType.RIGHT : AlignmentType.LEFT,
-    bidirectional: isArabic,
-    bullet: {
-      level: 0,
-    },
-    indent: {
-      left: isArabic ? 0 : INDENT.bulletLeft,
-      hanging: isArabic ? 0 : INDENT.bulletHanging,
-    },
-    spacing: {
-      after: SPACING.bulletAfter,
-    },
-    children: [
-      new TextRun({
-        text,
-        size: FONT_SIZE.bullet,
-        color: COLOR.mainText,
-        font: getPrimaryFont(language),
-      }),
-    ],
-  });
-}
+  paras.push(new Paragraph({
+    bidirectional: isAr, alignment: align,
+    spacing: { before: SPACING.itemBefore, after: 0 },
+    children: [new TextRun({ text: item.job_title, bold: true, size: FONT_SIZE.jobTitle, font })],
+  }));
 
-export function renderExperienceItems(
-  items: ExperienceItem[],
-  language: CvDocxLanguage
-): Paragraph[] {
-  const paragraphs: Paragraph[] = [];
-
-  for (const item of items) {
-    const cleanedItem: ExperienceItem = {
-      job_title: cleanText(item.job_title),
-      company: cleanText(item.company),
-      location: cleanText(item.location),
-      date_range: cleanText(item.date_range),
-      bullets: cleanTextArray(item.bullets),
-    };
-
-    const hasHeader =
-      cleanedItem.job_title !== "" ||
-      cleanedItem.company !== "" ||
-      cleanedItem.location !== "" ||
-      cleanedItem.date_range !== "";
-
-    const hasBullets = cleanedItem.bullets.length > 0;
-
-    if (!hasHeader && !hasBullets) {
-      continue;
-    }
-
-    paragraphs.push(...renderRoleHeader(cleanedItem, language));
-
-    for (const bullet of cleanedItem.bullets) {
-      paragraphs.push(renderBullet(bullet, language));
-    }
-
-    paragraphs.push(
-      new Paragraph({
-        spacing: {
-          after: SPACING.afterRole,
-        },
-      })
-    );
+  const companyLine = joinNonEmpty([item.company, item.location]);
+  if (companyLine) {
+    paras.push(new Paragraph({
+      bidirectional: isAr, alignment: align,
+      spacing: { before: 0, after: 0 },
+      children: [new TextRun({ text: companyLine, size: FONT_SIZE.body, font })],
+    }));
   }
 
-  return paragraphs;
+  if (item.date_range) {
+    paras.push(new Paragraph({
+      bidirectional: isAr, alignment: align,
+      spacing: { before: 0, after: 80 },
+      children: [new TextRun({ text: item.date_range, size: FONT_SIZE.body, font, italics: !isAr })],
+    }));
+  }
+
+  for (const bullet of item.bullets) {
+    if (!bullet?.trim()) continue;
+    paras.push(new Paragraph({
+      bidirectional: isAr, alignment: align,
+      bullet: { level: 0 },
+      spacing: { before: 40, after: SPACING.bulletAfter },
+      children: [new TextRun({ text: bullet, size: FONT_SIZE.body, font })],
+    }));
+  }
+
+  return paras;
+}
+
+export function renderExperience(cv: CvJsonV1): Paragraph[] {
+  if (!cv.experience.length) return [];
+  const isAr = cv.document_language === "ar";
+  return [
+    renderSectionTitle(isAr ? "الخبرات المهنية" : "Professional Experience", isAr),
+    ...cv.experience.flatMap((item) => renderRole(item, isAr)),
+  ];
+}
+
+export function renderInternships(cv: CvJsonV1): Paragraph[] {
+  if (!cv.internships.length) return [];
+  const isAr = cv.document_language === "ar";
+  return [
+    renderSectionTitle(isAr ? "التدريب" : "Internships", isAr),
+    ...cv.internships.flatMap((item) => renderRole(item, isAr)),
+  ];
 }

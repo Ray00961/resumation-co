@@ -1,118 +1,74 @@
 {
   "document_language": "en",
   "candidate_level": "fresh_graduate",
-  "full_name": "Kholoud Gamal Abou Bakr Mousa",
+  "full_name": "Ahmed Hassan",
   "contact": {
-    "email": "Khallaodo@gmail.com",
-    "phone": "+20 1121304560",
-    "linkedin": "",
-    "location": "Mansoura, Dakahlia, Egypt"
+    "email": "ahmed.hassan@example.com",
+    "phone": "+20 1000000000",
+    "linkedin": "linkedin.com/in/ahmedhassan",
+    "location": "Cairo, Egypt"
   },
-  "contact_line": "Khallaodo@gmail.com | +20 1121304560 | Mansoura, Dakahlia, Egypt",
-  "target_job": "Pharmacist",
-  "nationality": "Egyptian - Born in Saudi Arabia",
-  "summary": "Pharmacist with experience in regulatory inspection, hospital pharmacy, and emergency pharmacy operations. Currently works with the Egyptian Drug Authority in licensing inspection, with responsibilities linked to pharmaceutical licensing and regulatory review. Previous hospital experience includes pharmacy support in hospital and emergency settings. Background includes clinical research knowledge, pharmacy education, and strong use of Microsoft Office and Google Workspace tools.",
+  "contact_line": "ahmed.hassan@example.com | +20 1000000000 | linkedin.com/in/ahmedhassan | Cairo, Egypt",
+  "target_job": "Junior Software Engineer",
+  "nationality": "Egyptian",
+  "summary": "Recent Software Engineering graduate with academic exposure to frontend development, database design, and web application workflows. Built practical university projects involving e-commerce and inventory systems. Completed a summer internship supporting software development and testing tasks. Looking to apply technical skills in a professional development environment.",
   "core_competencies": {
-    "technical_skills": [
-      "Google Sheets",
-      "Google Docs",
-      "Google Drive",
-      "Microsoft Excel",
-      "Microsoft Word",
-      "Microsoft PowerPoint",
-      "Microsoft Access",
-      "Microsoft Teams",
-      "OneDrive"
-    ],
-    "industry_knowledge": [
-      "Pharmaceutical Licensing",
-      "Regulatory Inspection",
-      "Hospital Pharmacy",
-      "Emergency Pharmacy",
-      "Clinical Research"
-    ],
-    "professional_skills": [
-      "Documentation Review",
-      "Regulatory Compliance",
-      "Patient Support",
-      "Administrative Coordination",
-      "Report Preparation"
-    ]
+    "technical_skills": ["JavaScript", "React", "HTML", "CSS", "SQL", "Python"],
+    "industry_knowledge": ["Software Development", "Database Design", "Web Applications", "Software Testing"],
+    "professional_skills": ["Problem Solving", "Team Collaboration", "Time Management", "Communication"]
   },
-  "experience": [
+  "experience": [],
+  "internships": [
     {
-      "job_title": "Inspector",
-      "company": "Egyptian Drug Authority",
-      "location": "Dakahlia, Egypt",
-      "date_range": "2024 - Present",
+      "job_title": "Software Engineering Intern",
+      "company": "ABC Technology",
+      "location": "Cairo, Egypt",
+      "date_range": "Jun 2024 – Aug 2024",
       "bullets": [
-        "Conduct licensing inspection work for the Egyptian Drug Authority branch in Dakahlia.",
-        "Review pharmacy licensing files and related documentation as part of regulatory inspection activities.",
-        "Support licensing procedures by checking submitted information against required regulatory standards.",
-        "Work within the licensing department to help maintain compliance in pharmaceutical operations."
-      ]
-    },
-    {
-      "job_title": "Hospital and Emergency Pharmacist",
-      "company": "Tibah Hospital",
-      "location": "Mansoura, Dakahlia, Egypt",
-      "date_range": "2023 - 2023",
-      "bullets": [
-        "Worked as a pharmacist in hospital and emergency pharmacy settings.",
-        "Supported medication dispensing and day-to-day pharmacy operations.",
-        "Assisted with patient-facing pharmacy tasks and medication handling.",
-        "Followed internal pharmacy procedures for safe and organized medication support."
+        "Assisted senior developers with feature development and bug fixes on an internal web application.",
+        "Participated in daily stand-ups and sprint planning sessions.",
+        "Wrote and ran basic test cases to validate application behavior.",
+        "Contributed to internal documentation for new features."
       ]
     }
   ],
-  "internships": [],
   "education": [
     {
-      "degree": "Pharm D",
-      "major": "Pharmacy",
-      "institution": "Mansoura University",
-      "location": "Mansoura, Dakahlia, Egypt",
-      "date_range": "2022 - 2025",
-      "gpa": ""
-    },
-    {
-      "degree": "Diploma",
-      "major": "Toxicology, Chemical Analysis, and Forensic Analysis",
-      "institution": "Mansoura University",
-      "location": "Mansoura, Dakahlia, Egypt",
-      "date_range": "2021 - 2022",
-      "gpa": ""
-    },
-    {
-      "degree": "Bachelor's Degree",
-      "major": "Pharmacy",
-      "institution": "Faculty of Pharmacy and Pharmaceutical Manufacturing - Sinai University",
-      "location": "Kantara Branch, Egypt",
-      "date_range": "2021",
-      "gpa": ""
+      "degree": "Bachelor of Software Engineering",
+      "major": "Software Engineering",
+      "institution": "Cairo University",
+      "location": "Cairo, Egypt",
+      "date_range": "2020 – 2024",
+      "gpa": "3.7 / 4.0"
     }
   ],
   "certifications": [
+    { "name": "Google Data Analytics Certificate", "issuer": "Google", "date": "2024" }
+  ],
+  "projects": [
     {
-      "name": "TOEFL",
-      "issuer": "",
-      "date": ""
+      "title": "E-commerce Website",
+      "date": "2023",
+      "description": "University project for an online retail platform.",
+      "bullets": [
+        "Developed product catalog and shopping cart functionality.",
+        "Implemented user authentication and session management.",
+        "Designed responsive layouts compatible with mobile and desktop."
+      ]
     },
     {
-      "name": "IELTS",
-      "issuer": "",
-      "date": ""
+      "title": "Inventory Management System",
+      "date": "2024",
+      "description": "Academic project for stock tracking and reporting.",
+      "bullets": [
+        "Designed relational database schema for inventory records.",
+        "Built inventory tracking, search, and update functions.",
+        "Generated summary reports for stock levels and movements."
+      ]
     }
   ],
-  "projects": [],
   "languages": [
-    {
-      "language": "Arabic",
-      "level": "Native/Bilingual"
-    },
-    {
-      "language": "English",
-      "level": "Fluent/Advanced"
-    }
+    { "language": "Arabic", "level": "Native" },
+    { "language": "English", "level": "Professional" }
   ]
 }

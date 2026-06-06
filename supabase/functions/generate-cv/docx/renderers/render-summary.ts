@@ -1,42 +1,18 @@
-import {
-  AlignmentType,
-  Paragraph,
-  TextRun,
-} from "npm:docx@9.7.1";
+import { AlignmentType, Paragraph, TextRun } from "https://esm.sh/docx@8.5.0";
 import type { CvJsonV1 } from "../../schemas/cv-json-v1.ts";
-import {
-  COLOR,
-  FONT_SIZE,
-  SPACING,
-  getPrimaryFont,
-  type CvDocxLanguage,
-} from "../styles/cv-docx-styles.ts";
-import { cleanText } from "../utils/text-utils.ts";
+import { renderSectionTitle } from "./render-section-title.ts";
+import { FONT_SIZE, FONT } from "../styles/cv-docx-styles.ts";
 
 export function renderSummary(cv: CvJsonV1): Paragraph[] {
-  const language = cv.document_language as CvDocxLanguage;
-  const isArabic = language === "ar";
-  const summary = cleanText(cv.summary);
-
-  if (summary === "") {
-    return [];
-  }
-
+  if (!cv.summary) return [];
+  const isAr = cv.document_language === "ar";
   return [
+    renderSectionTitle(isAr ? "الملخص المهني" : "Professional Summary", isAr),
     new Paragraph({
-      alignment: isArabic ? AlignmentType.RIGHT : AlignmentType.LEFT,
-      bidirectional: isArabic,
-      spacing: {
-        after: SPACING.afterParagraph,
-      },
-      children: [
-        new TextRun({
-          text: summary,
-          size: FONT_SIZE.body,
-          color: COLOR.mainText,
-          font: getPrimaryFont(language),
-        }),
-      ],
+      bidirectional: isAr,
+      alignment: isAr ? AlignmentType.RIGHT : AlignmentType.LEFT,
+      spacing: { before: 0, after: 60 },
+      children: [new TextRun({ text: cv.summary, size: FONT_SIZE.body, font: isAr ? FONT.ar : FONT.en })],
     }),
   ];
 }

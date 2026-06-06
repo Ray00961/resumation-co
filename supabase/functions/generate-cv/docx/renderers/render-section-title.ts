@@ -1,45 +1,21 @@
-import {
-  AlignmentType,
-  BorderStyle,
-  Paragraph,
-  TextRun,
-} from "npm:docx@9.7.1";
-import {
-  BORDER,
-  COLOR,
-  FONT_SIZE,
-  getPrimaryFont,
-  type CvDocxLanguage,
-} from "../styles/cv-docx-styles.ts";
+import { AlignmentType, BorderStyle, Paragraph, TextRun } from "https://esm.sh/docx@8.5.0";
+import { FONT_SIZE, FONT, SPACING, COLOR } from "../styles/cv-docx-styles.ts";
 
-export function renderSectionTitle(
-  title: string,
-  language: CvDocxLanguage
-): Paragraph {
-  const isArabic = language === "ar";
-
+export function renderSectionTitle(title: string, isAr: boolean): Paragraph {
   return new Paragraph({
-    alignment: isArabic ? AlignmentType.RIGHT : AlignmentType.LEFT,
-    bidirectional: isArabic,
-    spacing: {
-      before: 220,
-      after: 120,
-    },
+    bidirectional: isAr,
+    alignment: isAr ? AlignmentType.RIGHT : AlignmentType.LEFT,
+    spacing: { before: SPACING.sectionBefore, after: SPACING.sectionAfter },
     border: {
-      bottom: {
-        style: BorderStyle.SINGLE,
-        color: BORDER.sectionTitle.color,
-        size: BORDER.sectionTitle.size,
-        space: BORDER.sectionTitle.space,
-      },
+      bottom: { color: COLOR.black, space: 1, style: BorderStyle.SINGLE, size: 6 },
     },
     children: [
       new TextRun({
-        text: isArabic ? title : title.toUpperCase(),
+        text: title,
         bold: true,
-        size: FONT_SIZE.sectionTitle,
-        color: COLOR.mainText,
-        font: getPrimaryFont(language),
+        size: FONT_SIZE.sectionHeader,
+        font: isAr ? FONT.ar : FONT.en,
+        allCaps: !isAr,
       }),
     ],
   });

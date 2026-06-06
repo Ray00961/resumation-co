@@ -1,22 +1,3 @@
-export type DocumentLanguage = "en" | "ar";
-
-export type CandidateLevel =
-  | "fresh_graduate"
-  | "junior"
-  | "mid"
-  | "senior"
-  | "executive";
-
-export const allowedDocumentLanguages = ["en", "ar"] as const;
-
-export const allowedCandidateLevels = [
-  "fresh_graduate",
-  "junior",
-  "mid",
-  "senior",
-  "executive",
-] as const;
-
 export interface ContactInfo {
   email: string;
   phone: string;
@@ -66,8 +47,8 @@ export interface LanguageItem {
 }
 
 export interface CvJsonV1 {
-  document_language: DocumentLanguage;
-  candidate_level: CandidateLevel;
+  document_language: "en" | "ar";
+  candidate_level: "fresh_graduate" | "junior" | "mid" | "senior" | "executive";
   full_name: string;
   contact: ContactInfo;
   contact_line: string;

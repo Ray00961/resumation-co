@@ -1,67 +1,63 @@
 {
   "document_language": "en",
-  "candidate_level": "mid",
+  "candidate_level": "junior",
   "full_name": "Kholoud Gamal Abou Bakr Mousa",
   "contact": {
     "email": "Khallaodo@gmail.com",
     "phone": "+20 1121304560",
     "linkedin": "",
-    "location": "Mansoura, Dakahlia, Egypt"
+    "location": "Dakahlia, Egypt"
   },
-  "contact_line": "Khallaodo@gmail.com | +20 1121304560 | Mansoura, Dakahlia, Egypt",
+  "contact_line": "Khallaodo@gmail.com | +20 1121304560 | Dakahlia, Egypt",
   "target_job": "Pharmacist",
   "nationality": "Egyptian - Born in Saudi Arabia",
-  "summary": "Pharmacist with experience in regulatory inspection, hospital pharmacy, and emergency pharmacy operations. Currently works with the Egyptian Drug Authority in licensing inspection, with responsibilities linked to pharmaceutical licensing and regulatory review. Previous hospital experience includes pharmacy support in hospital and emergency settings. Background includes clinical research knowledge, pharmacy education, and strong use of Microsoft Office and Google Workspace tools.",
+  "summary": "Pharmacist with early-career experience in pharmaceutical regulatory inspection and hospital pharmacy. Currently serving as a Licensing Inspector at the Egyptian Drug Authority in Dakahlia, reviewing facility applications and supporting regulatory compliance procedures. Previous hospital experience covers prescription dispensing, patient-facing pharmacy tasks, and emergency pharmacy operations.",
   "core_competencies": {
     "technical_skills": [
-      "Google Sheets",
-      "Google Docs",
-      "Google Drive",
       "Microsoft Excel",
       "Microsoft Word",
       "Microsoft PowerPoint",
-      "Microsoft Access",
       "Microsoft Teams",
+      "Google Sheets",
       "OneDrive"
     ],
     "industry_knowledge": [
       "Pharmaceutical Licensing",
-      "Regulatory Inspection",
+      "Regulatory Compliance",
       "Hospital Pharmacy",
       "Emergency Pharmacy",
       "Clinical Research"
     ],
     "professional_skills": [
       "Documentation Review",
-      "Regulatory Compliance",
-      "Patient Support",
-      "Administrative Coordination",
-      "Report Preparation"
+      "Report Preparation",
+      "Patient Communication",
+      "Attention to Detail"
     ]
   },
   "experience": [
     {
-      "job_title": "Inspector",
+      "job_title": "Licensing Inspector",
       "company": "Egyptian Drug Authority",
       "location": "Dakahlia, Egypt",
-      "date_range": "2024 - Present",
+      "date_range": "2024 – Present",
       "bullets": [
-        "Conduct licensing inspection work for the Egyptian Drug Authority branch in Dakahlia.",
-        "Review pharmacy licensing files and related documentation as part of regulatory inspection activities.",
-        "Support licensing procedures by checking submitted information against required regulatory standards.",
-        "Work within the licensing department to help maintain compliance in pharmaceutical operations."
+        "Reviews licensing applications submitted by pharmaceutical facilities and checks compliance with regulatory requirements.",
+        "Conducts field inspections of pharmaceutical premises and documents findings.",
+        "Follows up with facility owners on outstanding documentation and licensing conditions.",
+        "Maintains inspection records and prepares reports in accordance with Egyptian Drug Authority procedures."
       ]
     },
     {
       "job_title": "Hospital and Emergency Pharmacist",
       "company": "Tibah Hospital",
-      "location": "Mansoura, Dakahlia, Egypt",
-      "date_range": "2023 - 2023",
+      "location": "Mansoura, Egypt",
+      "date_range": "2023",
       "bullets": [
-        "Worked as a pharmacist in hospital and emergency pharmacy settings.",
-        "Supported medication dispensing and day-to-day pharmacy operations.",
-        "Assisted with patient-facing pharmacy tasks and medication handling.",
-        "Followed internal pharmacy procedures for safe and organized medication support."
+        "Dispensed medications and managed prescription review in hospital and emergency pharmacy settings.",
+        "Worked alongside medical staff to support safe and accurate medication use for patients.",
+        "Handled medication preparation, labeling, and patient-facing pharmacy queries.",
+        "Maintained pharmacy records and followed regulated procedures for controlled and standard medications."
       ]
     }
   ],
@@ -71,48 +67,34 @@
       "degree": "Pharm D",
       "major": "Pharmacy",
       "institution": "Mansoura University",
-      "location": "Mansoura, Dakahlia, Egypt",
-      "date_range": "2022 - 2025",
+      "location": "Mansoura, Egypt",
+      "date_range": "2022 – 2025",
       "gpa": ""
     },
     {
       "degree": "Diploma",
-      "major": "Toxicology, Chemical Analysis, and Forensic Analysis",
+      "major": "Toxicology and Forensic Chemical Analysis",
       "institution": "Mansoura University",
-      "location": "Mansoura, Dakahlia, Egypt",
-      "date_range": "2021 - 2022",
+      "location": "Mansoura, Egypt",
+      "date_range": "2021 – 2022",
       "gpa": ""
     },
     {
       "degree": "Bachelor's Degree",
       "major": "Pharmacy",
       "institution": "Faculty of Pharmacy and Pharmaceutical Manufacturing - Sinai University",
-      "location": "Kantara Branch, Egypt",
+      "location": "Kantara, Egypt",
       "date_range": "2021",
       "gpa": ""
     }
   ],
   "certifications": [
-    {
-      "name": "TOEFL",
-      "issuer": "",
-      "date": ""
-    },
-    {
-      "name": "IELTS",
-      "issuer": "",
-      "date": ""
-    }
+    { "name": "TOEFL", "issuer": "", "date": "" },
+    { "name": "IELTS", "issuer": "", "date": "" }
   ],
   "projects": [],
   "languages": [
-    {
-      "language": "Arabic",
-      "level": "Native/Bilingual"
-    },
-    {
-      "language": "English",
-      "level": "Fluent/Advanced"
-    }
+    { "language": "Arabic", "level": "Native" },
+    { "language": "English", "level": "Fluent" }
   ]
 }

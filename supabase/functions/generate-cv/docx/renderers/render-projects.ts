@@ -1,74 +1,41 @@
-import { Paragraph, TextRun } from "npm:docx@9.7.1";
-import type { ProjectItem } from "../../schemas/cv-json-v1.ts";
-import {
-  COLOR,
-  FONT_SIZE,
-  SPACING,
-  getPrimaryFont,
-  type CvDocxLanguage,
-} from "../styles/cv-docx-styles.ts";
+import { AlignmentType, Paragraph, TextRun } from "https://esm.sh/docx@8.5.0";
+import type { CvJsonV1 } from "../../schemas/cv-json-v1.ts";
+import { renderSectionTitle } from "./render-section-title.ts";
+import { FONT_SIZE, FONT, SPACING } from "../styles/cv-docx-styles.ts";
 
-export function renderProjects(
-  items: ProjectItem[],
-  language: CvDocxLanguage
-): Paragraph[] {
-  const paragraphs: Paragraph[] = [];
+export function renderProjects(cv: CvJsonV1): Paragraph[] {
+  if (!cv.projects.length) return [];
+  const isAr = cv.document_language === "ar";
+  const font = isAr ? FONT.ar : FONT.en;
+  const align = isAr ? AlignmentType.RIGHT : AlignmentType.LEFT;
+  const paras: Paragraph[] = [renderSectionTitle(isAr ? "المشاريع" : "Projects", isAr)];
 
-  for (const item of items) {
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: item.title,
-            bold: true,
-            size: FONT_SIZE.body,
-            color: COLOR.mainText,
-            font: getPrimaryFont(language),
-          }),
-        ],
-      })
-    );
+  for (const item of cv.projects) {
+    const titleLine = item.date ? `${item.title} — ${item.date}` : item.title;
+    paras.push(new Paragraph({
+      bidirectional: isAr, alignment: align,
+      spacing: { before: SPACING.itemBefore, after: 0 },
+      children: [new TextRun({ text: titleLine, bold: true, size: FONT_SIZE.jobTitle, font })],
+    }));
 
     if (item.description) {
-      paragraphs.push(
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: item.description,
-              size: FONT_SIZE.body,
-              color: COLOR.mainText,
-              font: getPrimaryFont(language),
-            }),
-          ],
-        })
-      );
+      paras.push(new Paragraph({
+        bidirectional: isAr, alignment: align,
+        spacing: { before: 0, after: item.bullets.length ? 0 : SPACING.itemAfter },
+        children: [new TextRun({ text: item.description, size: FONT_SIZE.body, font })],
+      }));
     }
 
     for (const bullet of item.bullets) {
-      paragraphs.push(
-        new Paragraph({
-          bullet: {
-            level: 0,
-          },
-          children: [
-            new TextRun({
-              text: bullet,
-              size: FONT_SIZE.bullet,
-              font: getPrimaryFont(language),
-            }),
-          ],
-        })
-      );
+      if (!bullet?.trim()) continue;
+      paras.push(new Paragraph({
+        bidirectional: isAr, alignment: align,
+        bullet: { level: 0 },
+        spacing: { before: 40, after: SPACING.bulletAfter },
+        children: [new TextRun({ text: bullet, size: FONT_SIZE.body, font })],
+      }));
     }
-
-    paragraphs.push(
-      new Paragraph({
-        spacing: {
-          after: SPACING.afterRole,
-        },
-      })
-    );
   }
 
-  return paragraphs;
+  return paras;
 }
