@@ -14,13 +14,33 @@ import {
 import { buildContactLine } from "../utils/contact-utils.ts";
 import { cleanText } from "../utils/text-utils.ts";
 
+function ltr(text: string): string {
+  return `\u2066${text}\u2069`;
+}
+
+function buildArabicContactLine(cv: CvJsonV1): string {
+  const email = cleanText(cv.contact.email);
+  const phone = cleanText(cv.contact.phone);
+  const location = cleanText(cv.contact.location);
+
+  const parts: string[] = [];
+
+  if (email !== "") parts.push(ltr(email));
+  if (phone !== "") parts.push(ltr(phone));
+  if (location !== "") parts.push(location);
+
+  return parts.join(" | ");
+}
+
 export function renderHeader(cv: CvJsonV1): Paragraph[] {
   const language = cv.document_language as CvDocxLanguage;
   const isArabic = language === "ar";
 
   const fullName = cleanText(cv.full_name);
-  const contactLine =
-    cleanText(cv.contact_line) !== ""
+
+  const contactLine = isArabic
+    ? buildArabicContactLine(cv)
+    : cleanText(cv.contact_line) !== ""
       ? cleanText(cv.contact_line)
       : buildContactLine(cv.contact);
 

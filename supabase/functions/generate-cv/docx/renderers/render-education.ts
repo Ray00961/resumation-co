@@ -26,14 +26,16 @@ export function renderEducationItems(
   for (const item of items) {
     const degreeLine =
       item.major.trim() !== ""
-        ? `${cleanText(item.degree)} in ${cleanText(item.major)}`
+        ? isArabic
+          ? `${cleanText(item.degree)}`
+          : `${cleanText(item.degree)} in ${cleanText(item.major)}`
         : cleanText(item.degree);
 
     const institutionLine = joinNonEmpty(
       [
-        item.institution,
-        item.location,
-        item.date_range,
+        cleanText(item.institution),
+        cleanText(item.location),
+        cleanText(item.date_range),
       ],
       " | "
     );
