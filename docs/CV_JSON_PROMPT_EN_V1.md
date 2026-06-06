@@ -318,6 +318,52 @@ Before generating the final JSON:
   * Education
   * Skills
 
+### Keyword Coverage Rule
+
+For each major role:
+
+Include the most relevant ATS keywords naturally supported by the candidate's actual experience.
+
+Do not force keywords into sentences.
+
+Prioritize keyword coverage across the entire CV rather than repeating the same keywords multiple times.
+
+Use keywords where they genuinely improve searchability and recruiter matching.
+
+### Job Title Alignment Rule
+
+When appropriate, align wording with common market terminology used in real job descriptions.
+
+Preserve the candidate's actual job title.
+
+Do not invent, upgrade, or inflate job titles.
+
+Use terminology that improves recruiter recognition and ATS matching while remaining fully accurate to the candidate's experience.
+
+### ATS Searchability Rule
+
+Skills, technologies, software, platforms, certifications, methodologies, and tools should use their commonly recognized market names.
+
+Avoid unnecessary paraphrasing of technical terms.
+
+Prefer industry-standard terminology whenever it accurately reflects the candidate's experience.
+
+Use the exact names of technologies, platforms, certifications, and tools whenever available.
+
+Do not replace well-known industry terms with creative or informal alternatives.
+
+### Recruiter Recognition Rule
+
+Prefer wording that is immediately recognizable to recruiters, hiring managers, and ATS systems.
+
+Use common professional terminology that appears frequently in real job descriptions.
+
+Avoid unusual, creative, trendy, or company-specific phrasing when a widely recognized industry term exists.
+
+Choose clarity over originality.
+
+The goal is immediate understanding by both recruiters and ATS systems.
+
 ---
 
 ATS Safety Rules
