@@ -2,6 +2,8 @@
 // @ts-ignore esm.sh default export typing issue
 import HTMLtoDOCX from "https://esm.sh/html-to-docx@1.8.0?target=deno";
 import { buildCvDocx } from "./docx/builders/build-cv-docx.ts";
+import { CV_JSON_PROMPT_AR_V1 } from "./prompts/cv-json-prompt-ar-v1.ts";
+import { CV_JSON_PROMPT_EN_V1 } from "./prompts/cv-json-prompt-en-v1.ts";
 
 const SUPABASE_URL      = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -1218,15 +1220,6 @@ async function generateCvHtml(cvData: any, plan: string, lang: string): Promise<
   return extractDiv(data.choices?.[0]?.message?.content ?? "");
 }
 
-async function loadCvJsonPrompt(lang: string): Promise<string> {
-  const promptFile =
-    lang === "ar"
-      ? "./prompts/cv-json-prompt-ar-v1.md"
-      : "./prompts/cv-json-prompt-en-v1.md";
-
-  return await Deno.readTextFile(new URL(promptFile, import.meta.url));
-}
-
 function extractJsonObject(raw: string): unknown {
   const cleaned = String(raw || "")
     .replace(/^```json\s*/i, "")
@@ -1246,7 +1239,7 @@ function extractJsonObject(raw: string): unknown {
 
 async function generateCvJson(cvData: any, plan: string, lang: string): Promise<unknown> {
   const cvDataJson = JSON.stringify(cvData, null, 2);
-  const basePrompt = await loadCvJsonPrompt(lang);
+  const basePrompt = lang === "ar" ? CV_JSON_PROMPT_AR_V1 : CV_JSON_PROMPT_EN_V1;
 
   const systemPrompt = basePrompt.replace("{{CV_DATA}}", cvDataJson);
 

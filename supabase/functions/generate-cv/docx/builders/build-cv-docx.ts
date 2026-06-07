@@ -15,17 +15,17 @@ async function forceArabicParagraphDirection(bytes: Uint8Array): Promise<Uint8Ar
   let xml = await documentXmlFile.async("string");
   xml = xml.replace(/<w:jc w:val="right"\/>/g, "");
 
-  xml = xml.replace(/<w:pPr>(?![\s\S]*?<\/w:pPr>[\s\S]*?<w:pPr>)([\s\S]*?)<\/w:pPr>/g, (match, inner) => {
+  xml = xml.replace(/<w:pPr>(?![\s\S]*?<\/w:pPr>[\s\S]*?<w:pPr>)([\s\S]*?)<\/w:pPr>/g, (match: string, inner: string) => {
     if (inner.includes("<w:bidi")) return match;
     return `<w:pPr><w:bidi/>${inner}</w:pPr>`;
   });
 
-  xml = xml.replace(/<w:pPr>([\s\S]*?)<\/w:pPr>/g, (match, inner) => {
+  xml = xml.replace(/<w:pPr>([\s\S]*?)<\/w:pPr>/g, (match: string, inner: string) => {
     if (inner.includes("<w:bidi")) return match;
     return `<w:pPr><w:bidi/>${inner}</w:pPr>`;
   });
 
-  xml = xml.replace(/<w:sectPr([^>]*)>([\s\S]*?)<\/w:sectPr>/g, (match, attrs, inner) => inner.includes("<w:bidi") ? match : `<w:sectPr${attrs}>${inner}<w:bidi/></w:sectPr>`);
+  xml = xml.replace(/<w:sectPr([^>]*)>([\s\S]*?)<\/w:sectPr>/g, (match: string, attrs: string, inner: string) => inner.includes("<w:bidi") ? match : `<w:sectPr${attrs}>${inner}<w:bidi/></w:sectPr>`);
   zip.file("word/document.xml", xml);
 
   const settingsXmlFile = zip.file("word/settings.xml");
