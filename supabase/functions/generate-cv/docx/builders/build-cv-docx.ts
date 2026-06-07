@@ -1,5 +1,6 @@
 ﻿import { Document, Packer } from "https://esm.sh/docx@8.5.0";
-import JSZip from "https://esm.sh/jszip@3.10.1";
+// @ts-ignore esm.sh default export typing issue
+import JSZip from "https://esm.sh/jszip@3.10.1?target=deno";
 import type { CvJsonV1 } from "../../schemas/cv-json-v1.ts";
 import { validateCvJsonV1 } from "../../validators/validate-cv-json.ts";
 import { normalizeCvJsonV1 } from "../../validators/normalize-cv-json.ts";
@@ -75,3 +76,5 @@ export async function buildCvDocx(rawCv: unknown): Promise<Uint8Array> {
 
   return isAr ? await forceArabicParagraphDirection(bytes) : bytes;
 }
+
+
