@@ -143,9 +143,9 @@ export default function Hero() {
   const [statsVisible, setStatsVisible] = useState(false);
   const [statsLoading, setStatsLoading] = useState(true);
   const [targetCounts, setTargetCounts] = useState({
-    resumes: 12400,
-    users: 8500,
-    companies: 340,
+    resumes: 0,
+    users: 0,
+    companies: 0,
   });
   const [counts, setCounts] = useState({
     resumes: 0,
@@ -194,8 +194,8 @@ export default function Hero() {
       example: "See Example",
       statsEyebrow: "Trusted by job seekers",
       statsTitle: "Real platform activity",
-      rBuilt: "Resumes Generated",
-      aAcc: "Active Users",
+      rBuilt: "CVs Generated",
+      aAcc: "Users Joined",
       hChan: "Companies in Database",
       srvTitle: "How Resumation Helps",
       srvSub: "Three clear advantages before your next job application",
@@ -241,15 +241,24 @@ export default function Hero() {
   useEffect(() => {
     (async () => {
       try {
-        const [r, u] = await Promise.all([
-          supabase.from("cv_archive").select("*", { count: "exact", head: true }),
-          supabase.from("users").select("*", { count: "exact", head: true }),
+        const [g, u, c] = await Promise.all([
+          supabase
+            .from("order_generations")
+            .select("generation_id", { count: "exact", head: true }),
+
+          supabase
+            .from("users")
+            .select("*", { count: "exact", head: true }),
+
+          supabase
+            .from("hunter_companies")
+            .select("*", { count: "exact", head: true }),
         ]);
 
         setTargetCounts({
-          resumes: r.count ?? 12400,
-          users: u.count ?? 8500,
-          companies: 340,
+          resumes: g.count ?? 0,
+          users: u.count ?? 0,
+          companies: c.count ?? 0,
         });
       } catch {
         // use defaults
