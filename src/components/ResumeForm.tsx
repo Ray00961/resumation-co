@@ -10,6 +10,11 @@ interface WorkEntry {
   location: string;
   startDate: string;
   endDate: string;
+  startMonth: string;
+  startYear: string;
+  endMonth: string;
+  endYear: string;
+  isCurrent: boolean;
   responsibilities: string;
 }
 
@@ -19,6 +24,7 @@ interface EducationEntry {
   university: string;
   location: string;
   graduationYear: string;
+  gpa: string;
 }
 
 interface CertEntry {
@@ -40,6 +46,7 @@ interface FormState {
   cvEmail: string;
   linkedin: string;
   nationality: string;
+  location: string;
   targetJob: string;
   work: WorkEntry[];
   education: EducationEntry[];
@@ -53,8 +60,20 @@ interface FormState {
   agreedToTerms: boolean;
 }
 
-const defaultWork: WorkEntry    = { jobTitle: "", company: "", location: "", startDate: "", endDate: "", responsibilities: "" };
-const defaultEdu: EducationEntry = { degree: "", major: "", university: "", location: "", graduationYear: "" };
+const defaultWork: WorkEntry = {
+  jobTitle: "",
+  company: "",
+  location: "",
+  startDate: "",
+  endDate: "",
+  startMonth: "",
+  startYear: "",
+  endMonth: "",
+  endYear: "",
+  isCurrent: false,
+  responsibilities: "",
+};
+const defaultEdu: EducationEntry = { degree: "", major: "", university: "", location: "", graduationYear: "", gpa: "" };
 const defaultCert: CertEntry     = { name: "", institution: "", year: "" };
 const defaultProject: ProjectEntry = { title: "", description: "", year: "" };
 
@@ -216,6 +235,14 @@ const SKILLS_CATEGORIES = [
   // ── MARKETING ──
   { label: "Marketing & Analytics", skills: ["Google Analytics", "Google Ads", "Facebook/Meta Ads", "TikTok Ads", "SEO", "SEM", "Social Media Marketing", "Content Marketing", "Email Marketing", "Mailchimp", "Klaviyo", "HubSpot Marketing"] },
   { label: "E-Commerce & CMS",      skills: ["WordPress", "Shopify", "WooCommerce", "Webflow", "Wix", "Squarespace", "Magento", "PrestaShop", "Drupal"] },
+  // ── OPERATIONS / CUSTOMER-FACING ──
+  { label: "Sales & Business Development", skills: ["Sales Prospecting", "Lead Generation", "Account Management", "B2B Sales", "B2C Sales", "Cold Calling", "Negotiation", "Client Relationship Management", "Salesforce CRM", "HubSpot CRM", "Pipeline Management", "Sales Reporting", "Target Achievement", "Customer Retention"] },
+  { label: "Customer Service & Support", skills: ["Customer Support", "Call Center Operations", "Complaint Resolution", "Zendesk", "Freshdesk", "Intercom", "Live Chat Support", "Email Support", "Phone Support", "Ticketing Systems", "CRM Documentation", "Customer Satisfaction", "Service Recovery"] },
+  { label: "Hospitality & Tourism", skills: ["Hotel Operations", "Front Desk Operations", "Guest Relations", "Reservation Systems", "Housekeeping Coordination", "Food & Beverage Service", "Event Coordination", "Opera PMS", "Restaurant Management", "Travel Coordination", "Tour Operations"] },
+  { label: "Retail & Store Operations", skills: ["POS Systems", "Inventory Control", "Visual Merchandising", "Cash Handling", "Store Operations", "Stock Replenishment", "Sales Floor Management", "Customer Assistance", "Loss Prevention", "Shift Supervision"] },
+  { label: "Logistics & Supply Chain", skills: ["Logistics Coordination", "Supply Chain Management", "Warehouse Operations", "Procurement", "Vendor Management", "Shipping Documentation", "Fleet Coordination", "Inventory Planning", "Demand Forecasting", "ERP Systems", "Import/Export Documentation"] },
+  { label: "Human Resources", skills: ["Recruitment", "Talent Acquisition", "Onboarding", "Employee Relations", "Payroll Coordination", "HRIS", "Performance Management", "Training Coordination", "Interview Scheduling", "Policy Administration"] },
+  { label: "Administrative & Office", skills: ["Office Administration", "Data Entry", "Document Management", "Calendar Management", "Executive Assistance", "Records Management", "Scheduling", "Travel Arrangements", "Reporting", "Filing Systems"] },
   // ── OTHER ──
   { label: "Project Management",  skills: ["Agile", "Scrum", "Kanban", "PMP", "PRINCE2", "Risk Management", "Stakeholder Management", "Change Management", "OKRs"] },
   { label: "Healthcare & Medical", skills: ["EHR/EMR Systems", "Medical Coding (ICD-10)", "HIPAA Compliance", "Medical Billing", "Clinical Research", "Medical Imaging", "Laboratory Analysis", "Pharmacovigilance"] },
@@ -235,6 +262,57 @@ const langOptions = [
 function generateId(len = 7) {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
+const MONTH_OPTIONS = [
+  { value: "01", en: "January", ar: "يناير" },
+  { value: "02", en: "February", ar: "فبراير" },
+  { value: "03", en: "March", ar: "مارس" },
+  { value: "04", en: "April", ar: "أبريل" },
+  { value: "05", en: "May", ar: "مايو" },
+  { value: "06", en: "June", ar: "يونيو" },
+  { value: "07", en: "July", ar: "يوليو" },
+  { value: "08", en: "August", ar: "أغسطس" },
+  { value: "09", en: "September", ar: "سبتمبر" },
+  { value: "10", en: "October", ar: "أكتوبر" },
+  { value: "11", en: "November", ar: "نوفمبر" },
+  { value: "12", en: "December", ar: "ديسمبر" },
+];
+
+const YEAR_OPTIONS = Array.from({ length: 70 }, (_, i) => String(new Date().getFullYear() + 1 - i));
+
+function composeMonthYear(month: string, year: string) {
+  if (!month && !year) return "";
+  if (month && year) return `${month}/${year}`;
+  return year || month;
+}
+
+function splitMonthYear(value?: string) {
+  const raw = (value || "").trim();
+  const match = raw.match(/^(0?[1-9]|1[0-2])[\/\-](\d{4})$/);
+  if (match) return { month: match[1].padStart(2, "0"), year: match[2] };
+  const yearOnly = raw.match(/^(\d{4})$/);
+  if (yearOnly) return { month: "", year: yearOnly[1] };
+  return { month: "", year: "" };
+}
+
+function normalizeWorkEntry(raw: Partial<WorkEntry> = {}): WorkEntry {
+  const start = splitMonthYear(raw.startDate);
+  const end = splitMonthYear(raw.endDate);
+  const isCurrent = Boolean(raw.isCurrent || String(raw.endDate || "").toLowerCase() === "present");
+  return {
+    ...defaultWork,
+    ...raw,
+    startMonth: raw.startMonth || start.month,
+    startYear: raw.startYear || start.year,
+    endMonth: raw.endMonth || (isCurrent ? "" : end.month),
+    endYear: raw.endYear || (isCurrent ? "" : end.year),
+    isCurrent,
+  };
+}
+
+function normalizeEducationEntry(raw: Partial<EducationEntry> = {}): EducationEntry {
+  return { ...defaultEdu, ...raw, gpa: raw.gpa || "" };
 }
 
 function buildSuggestions(rows: any[]): Record<string, string[]> {
@@ -324,7 +402,7 @@ export default function ResumeForm() {
 
   const [form, setForm] = useState<FormState>({
     fullName: "", phoneCode: "+961", phone: "", cvEmail: "",
-    linkedin: "", nationality: "", targetJob: "",
+    linkedin: "", nationality: "", location: "", targetJob: "",
     work: [{ ...defaultWork }],
     education: [{ ...defaultEdu }],
     technicalSkills: [],
@@ -410,9 +488,10 @@ export default function ResumeForm() {
             cvEmail:     cv.cvEmail     || userEmail,
             linkedin:    cv.linkedin    || "",
             nationality: cv.nationality || "",
+            location:    cv.location    || cv.currentLocation || "",
             targetJob:   cv.targetJob   || "",
-            work:        cv.workExperience?.length ? cv.workExperience : [{ ...defaultWork }],
-            education:   cv.education?.length      ? cv.education      : [{ ...defaultEdu }],
+            work:        cv.workExperience?.length ? cv.workExperience.map((w: Partial<WorkEntry>) => normalizeWorkEntry(w)) : [{ ...defaultWork }],
+            education:   cv.education?.length      ? cv.education.map((e: Partial<EducationEntry>) => normalizeEducationEntry(e)) : [{ ...defaultEdu }],
             technicalSkills: Array.isArray(cv.technicalSkills)
               ? cv.technicalSkills
               : (cv.technicalSkills
@@ -448,7 +527,16 @@ export default function ResumeForm() {
       if (rawDraft) {
         try {
           const { form: savedForm, step: savedStep } = JSON.parse(rawDraft);
-          setForm(savedForm);
+          setForm({
+            ...savedForm,
+            location: savedForm.location || "",
+            work: Array.isArray(savedForm.work) && savedForm.work.length
+              ? savedForm.work.map((w: Partial<WorkEntry>) => normalizeWorkEntry(w))
+              : [{ ...defaultWork }],
+            education: Array.isArray(savedForm.education) && savedForm.education.length
+              ? savedForm.education.map((e: Partial<EducationEntry>) => normalizeEducationEntry(e))
+              : [{ ...defaultEdu }],
+          });
           if (savedStep) setStep(savedStep);
           setDraftLoaded(true);
           setDraftRestored(true);
@@ -489,9 +577,9 @@ export default function ResumeForm() {
   // ── Validation ──
   const isStepValid = () => {
     switch (step) {
-      case 1: return form.fullName.trim() !== "" && form.phone.trim() !== "" && form.cvEmail.trim() !== "" && form.nationality.trim() !== "" && form.targetJob.trim() !== "";
-      case 2: return form.work.every(w => w.jobTitle.trim() !== "" && w.company.trim() !== "");
-      case 3: return form.education.every(e => e.degree.trim() !== "" && e.university.trim() !== "");
+      case 1: return form.fullName.trim() !== "" && form.phone.trim() !== "" && form.cvEmail.trim() !== "" && form.nationality.trim() !== "" && form.location.trim() !== "" && form.targetJob.trim() !== "";
+      case 2: return form.work.every(w => w.jobTitle.trim() !== "" && w.company.trim() !== "" && w.startMonth.trim() !== "" && w.startYear.trim() !== "" && (w.isCurrent || (w.endMonth.trim() !== "" && w.endYear.trim() !== "")) && w.responsibilities.trim() !== "");
+      case 3: return form.education.every(e => e.degree.trim() !== "" && e.major.trim() !== "" && e.university.trim() !== "" && e.graduationYear.trim() !== "");
       case 4: return form.technicalSkills.length > 0;
       case 5: return true;
       case 6: return form.agreedToTerms;
@@ -520,8 +608,8 @@ export default function ResumeForm() {
   const setProj = (i: number, field: keyof ProjectEntry, value: string) =>
     setForm(prev => { const projects = [...prev.projects]; projects[i] = { ...projects[i], [field]: value }; return { ...prev, projects }; });
 
-  // ── AI Tips ──
-  const generateTips = async (i: number, jobTitle: string, company: string) => {
+  // ── AI Questions Engine ──
+  const generateQuestions = async (i: number, jobTitle: string, company: string) => {
     if (!jobTitle.trim()) return;
     setAiTips(prev => { const n = { ...prev }; delete n[i]; return n; });
     setAiLoading(prev => [...prev, i]);
@@ -552,6 +640,11 @@ export default function ResumeForm() {
     const authHeader = `Bearer ${accessToken ?? SUPABASE_KEY}`;
 
     const fullPhone = `${form.phoneCode} ${form.phone}`.trim();
+    const workExperience = form.work.map((w) => ({
+      ...w,
+      startDate: composeMonthYear(w.startMonth, w.startYear),
+      endDate: w.isCurrent ? "Present" : composeMonthYear(w.endMonth, w.endYear),
+    }));
 
     const cvData = {
       fullName:        form.fullName,
@@ -559,8 +652,9 @@ export default function ResumeForm() {
       cvEmail:         form.cvEmail,
       linkedin:        form.linkedin,
       nationality:     form.nationality,
+      location:        form.location,
       targetJob:       form.targetJob,
-      workExperience:  form.work,
+      workExperience,
       education:       form.education,
       technicalSkills: form.technicalSkills,        // array — not joined
       languages: {
@@ -679,7 +773,7 @@ export default function ResumeForm() {
             target_jobs: form.targetJob ? [form.targetJob] : [],
             skills:      form.technicalSkills,
             headline:    form.targetJob || "",
-            experience:  form.work
+            experience:  workExperience
               .filter(w => w.jobTitle || w.company)
               .map(w => ({
                 title:       w.jobTitle,
@@ -758,7 +852,7 @@ export default function ResumeForm() {
               onClick={() => {
                 if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
                 setDraftRestored(false);
-                setForm({ fullName: "", phoneCode: "+961", phone: "", cvEmail: "", linkedin: "", nationality: "", targetJob: "", work: [{ jobTitle:"", company:"", location:"", startDate:"", endDate:"", responsibilities:"" }], education: [{ degree:"", major:"", university:"", location:"", graduationYear:"" }], technicalSkills: [], langArabic: "", langEnglish: "", langFrench: "", langOther: "", certificates: [], projects: [], agreedToTerms: false });
+                setForm({ fullName: "", phoneCode: "+961", phone: "", cvEmail: "", linkedin: "", nationality: "", location: "", targetJob: "", work: [{ ...defaultWork }], education: [{ ...defaultEdu }], technicalSkills: [], langArabic: "", langEnglish: "", langFrench: "", langOther: "", certificates: [], projects: [], agreedToTerms: false });
                 setStep(1);
               }}
               className="text-[#7A8FAA] hover:text-red-400 font-semibold transition-colors uppercase tracking-wider text-[10px]"
@@ -911,6 +1005,12 @@ export default function ResumeForm() {
             </div>
 
             <div>
+              <label className={labelCls}>{isRtl ? "مكان الإقامة الحالي *" : "Current Location *"}</label>
+              <input className={inp(form.location, true)} value={form.location} onChange={e => set("location", e.target.value)} placeholder={isRtl ? "مثال: بيروت، لبنان" : "e.g. Beirut, Lebanon"} />
+              {errMsg(form.location, isRtl ? "مكان الإقامة مطلوب" : "Current location is required")}
+            </div>
+
+            <div>
               <label className={labelCls}>{isRtl ? "المسمى الوظيفي المستهدف *" : "Target Job Title *"}</label>
               <input className={inp(form.targetJob, true)} value={form.targetJob} onChange={e => set("targetJob", e.target.value)} placeholder={isRtl ? "مثال: مدير تسويق أول" : "e.g. Senior Marketing Manager"} onFocus={() => setActiveField("targetJob")} onBlur={() => setActiveField(null)} />
               <SuggestBox fieldKey="targetJob" onSelect={v => set("targetJob", v)} />
@@ -952,47 +1052,94 @@ export default function ResumeForm() {
                 </div>
 
                 <div>
-                  <label className={labelCls}>{isRtl ? "الموقع" : "Location"}</label>
+                  <label className={labelCls}>{isRtl ? "موقع العمل" : "Work Location"}</label>
                   <input className={inputCls} value={w.location} onChange={e => setWork(i, "location", e.target.value)} placeholder={isRtl ? "مثال: بيروت، لبنان" : "e.g. Beirut, Lebanon"} onFocus={() => setActiveField(`workLocation_${i}`)} onBlur={() => setActiveField(null)} />
                   <SuggestBox fieldKey="workLocation" onSelect={v => { setWork(i, "location", v); setActiveField(null); }} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={labelCls}>{isRtl ? "تاريخ البداية" : "Start Date"}</label>
-                    <input className={inputCls} value={w.startDate} onChange={e => setWork(i, "startDate", e.target.value)} placeholder="01/2020" dir="ltr" />
+                    <label className={labelCls}>{isRtl ? "شهر البداية *" : "Start Month *"}</label>
+                    <select className={inp(w.startMonth, true)} value={w.startMonth} onChange={e => setWork(i, "startMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
+                      <option value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
+                      {MONTH_OPTIONS.map(m => <option key={m.value} value={m.value}>{isRtl ? m.ar : m.en}</option>)}
+                    </select>
+                    {errMsg(w.startMonth, isRtl ? "شهر البداية مطلوب" : "Start month is required")}
                   </div>
                   <div>
-                    <label className={labelCls}>{isRtl ? "تاريخ النهاية" : "End Date"}</label>
-                    <input className={inputCls} value={w.endDate} onChange={e => setWork(i, "endDate", e.target.value)} placeholder={isRtl ? "حتى الآن" : "Present"} dir="ltr" />
+                    <label className={labelCls}>{isRtl ? "سنة البداية *" : "Start Year *"}</label>
+                    <select className={inp(w.startYear, true)} value={w.startYear} onChange={e => setWork(i, "startYear", e.target.value)} dir="ltr">
+                      <option value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                      {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    {errMsg(w.startYear, isRtl ? "سنة البداية مطلوبة" : "Start year is required")}
                   </div>
                 </div>
 
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !w.isCurrent;
+                    setForm(prev => {
+                      const work = [...prev.work];
+                      work[i] = { ...work[i], isCurrent: next, endMonth: next ? "" : work[i].endMonth, endYear: next ? "" : work[i].endYear };
+                      return { ...prev, work };
+                    });
+                  }}
+                  className={`flex items-center gap-2 text-[12px] font-semibold transition-colors ${w.isCurrent ? "text-[#12B2C1]" : "text-[#7A8FAA] hover:text-[#D9CBC2]"}`}
+                >
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center ${w.isCurrent ? "bg-[#12B2C1] border-[#12B2C1] text-[#0D1117]" : "border-[rgba(86,108,158,0.55)]"}`}>
+                    {w.isCurrent && <Check size={11} strokeWidth={3} />}
+                  </span>
+                  {isRtl ? "ما زلت أعمل هنا" : "I currently work here"}
+                </button>
+
+                {!w.isCurrent && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelCls}>{isRtl ? "شهر النهاية *" : "End Month *"}</label>
+                      <select className={inp(w.endMonth, true)} value={w.endMonth} onChange={e => setWork(i, "endMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
+                        <option value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
+                        {MONTH_OPTIONS.map(m => <option key={m.value} value={m.value}>{isRtl ? m.ar : m.en}</option>)}
+                      </select>
+                      {errMsg(w.endMonth, isRtl ? "شهر النهاية مطلوب" : "End month is required")}
+                    </div>
+                    <div>
+                      <label className={labelCls}>{isRtl ? "سنة النهاية *" : "End Year *"}</label>
+                      <select className={inp(w.endYear, true)} value={w.endYear} onChange={e => setWork(i, "endYear", e.target.value)} dir="ltr">
+                        <option value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                        {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                      {errMsg(w.endYear, isRtl ? "سنة النهاية مطلوبة" : "End year is required")}
+                    </div>
+                  </div>
+                )}
+
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-1.5 gap-3">
                     <label className={`${labelCls} mb-0`}>
-                      {isRtl ? "المهام والإنجازات" : "Responsibilities & Achievements"}
+                      {isRtl ? "المهام والإنجازات *" : "Responsibilities & Achievements *"}
                     </label>
                     <button
                       type="button"
                       disabled={!w.jobTitle.trim() || aiLoading.includes(i)}
-                      onClick={() => generateTips(i, w.jobTitle, w.company)}
-                      className="flex items-center gap-1 px-2.5 py-1 text-[11px] bg-[rgba(18,178,193,0.08)] border border-[rgba(18,178,193,0.3)] rounded-lg text-[rgba(18,178,193,0.9)] hover:bg-[rgba(18,178,193,0.18)] transition-all disabled:opacity-40 disabled:cursor-not-allowed font-semibold tracking-wide"
+                      onClick={() => generateQuestions(i, w.jobTitle, w.company)}
+                      className="flex items-center gap-1 px-2.5 py-1 text-[11px] bg-[rgba(18,178,193,0.08)] border border-[rgba(18,178,193,0.3)] rounded-lg text-[rgba(18,178,193,0.9)] hover:bg-[rgba(18,178,193,0.18)] transition-all disabled:opacity-40 disabled:cursor-not-allowed font-semibold tracking-wide whitespace-nowrap"
                     >
                       {aiLoading.includes(i)
-                        ? <><Loader2 size={10} className="animate-spin" /> {isRtl ? "جاري التحليل..." : "Analyzing..."}</>
-                        : <><Sparkles size={10} /> {isRtl ? "نصائح AI" : "AI Tips"}</>
+                        ? <><Loader2 size={10} className="animate-spin" /> {isRtl ? "جاري إنشاء الأسئلة..." : "Creating questions..."}</>
+                        : <><Sparkles size={10} /> {isRtl ? "أسئلة AI" : "AI Questions"}</>
                       }
                     </button>
                   </div>
                   <textarea
-                    className={`${inputCls} h-24 resize-none`}
+                    className={`${inp(w.responsibilities, true)} h-32 resize-none`}
                     value={w.responsibilities}
                     onChange={e => setWork(i, "responsibilities", e.target.value)}
-                    placeholder={isRtl ? "اكتب مهامك وإنجازاتك الرئيسية..." : "Describe your key responsibilities and achievements..."}
+                    placeholder={isRtl ? "اكتب إجاباتك أو مهامك هنا. إذا لا تعرف ماذا تكتب، اضغط أسئلة AI." : "Write your answers or responsibilities here. If you do not know what to write, click AI Questions."}
                   />
+                  {errMsg(w.responsibilities, isRtl ? "اكتب مهامك أو أجب على أسئلة AI" : "Add responsibilities or answer the AI questions")}
 
-                  {/* AI Tips panel */}
                   {aiTips[i] && (
                     <div className="mt-2 p-3 bg-[rgba(18,178,193,0.05)] border border-[rgba(18,178,193,0.2)] rounded-lg relative" dir={isRtl ? "rtl" : "ltr"}>
                       <button
@@ -1004,13 +1151,39 @@ export default function ResumeForm() {
                       </button>
                       <p className="text-[11px] font-bold text-[rgba(18,178,193,0.8)] uppercase tracking-widest mb-2 flex items-center gap-1">
                         <Sparkles size={9} />
-                        {isRtl ? "نصائح لتقوية السيرة الذاتية" : "Tips to strengthen your bullets"}
+                        {isRtl ? "أجب على هذه الأسئلة لتقوية سيرتك الذاتية" : "Answer these questions to improve your CV"}
                       </p>
-                      <div className={`space-y-1.5 ${isRtl ? "pl-2" : "pr-4"}`}>
-                        {aiTips[i].split("\n").filter(l => l.trim()).map((tip, t) => (
-                          <p key={t} className="text-[12px] text-[#C8BFBA] leading-relaxed">{tip}</p>
+                      <div className={`space-y-2 ${isRtl ? "pl-2" : "pr-4"}`}>
+                        {aiTips[i].split("
+").filter(l => l.trim()).map((question, qIdx) => (
+                          <p key={qIdx} className="text-[12px] text-[#C8BFBA] leading-relaxed">
+                            <span className="text-[#12B2C1] font-mono">{qIdx + 1}.</span> {question}
+                          </p>
                         ))}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const questionsText = aiTips[i]
+                            .split("
+")
+                            .filter(l => l.trim())
+                            .map(q => `${q}
+${isRtl ? "الإجابة: " : "Answer: "}`)
+                            .join("
+
+");
+                          const nextText = w.responsibilities.trim()
+                            ? `${w.responsibilities.trim()}
+
+${questionsText}`
+                            : questionsText;
+                          setWork(i, "responsibilities", nextText);
+                        }}
+                        className="mt-3 w-full py-2 rounded-lg border border-[rgba(18,178,193,0.25)] text-[12px] text-[#12B2C1] hover:bg-[rgba(18,178,193,0.08)] transition-colors font-semibold"
+                      >
+                        {isRtl ? "إضافة الأسئلة إلى خانة الإجابات" : "Add questions to answer box"}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1050,9 +1223,10 @@ export default function ResumeForm() {
                   {errMsg(e.degree, isRtl ? "الشهادة مطلوبة" : "Degree is required")}
                 </div>
                 <div>
-                  <label className={labelCls}>{isRtl ? "التخصص" : "Major / Field of Study"}</label>
-                  <input className={inputCls} value={e.major} onChange={ev => setEdu(i, "major", ev.target.value)} placeholder={isRtl ? "مثال: إدارة الأعمال" : "e.g. Business Administration"} onFocus={() => setActiveField(`major_${i}`)} onBlur={() => setActiveField(null)} />
+                  <label className={labelCls}>{isRtl ? "التخصص *" : "Major / Field of Study *"}</label>
+                  <input className={inp(e.major, true)} value={e.major} onChange={ev => setEdu(i, "major", ev.target.value)} placeholder={isRtl ? "مثال: إدارة الأعمال" : "e.g. Business Administration"} onFocus={() => setActiveField(`major_${i}`)} onBlur={() => setActiveField(null)} />
                   <SuggestBox fieldKey="major" onSelect={v => { setEdu(i, "major", v); setActiveField(null); }} />
+                  {errMsg(e.major, isRtl ? "التخصص مطلوب" : "Major is required")}
                 </div>
                 <div>
                   <label className={labelCls}>{isRtl ? "الجامعة *" : "University / School *"}</label>
@@ -1065,9 +1239,20 @@ export default function ResumeForm() {
                   <input className={inputCls} value={e.location} onChange={ev => setEdu(i, "location", ev.target.value)} placeholder={isRtl ? "مثال: بيروت، لبنان" : "e.g. Beirut, Lebanon"} onFocus={() => setActiveField(`eduLocation_${i}`)} onBlur={() => setActiveField(null)} />
                   <SuggestBox fieldKey="eduLocation" onSelect={v => { setEdu(i, "location", v); setActiveField(null); }} />
                 </div>
-                <div>
-                  <label className={labelCls}>{isRtl ? "سنة التخرج" : "Graduation Year"}</label>
-                  <input className={inputCls} value={e.graduationYear} onChange={ev => setEdu(i, "graduationYear", ev.target.value)} placeholder="e.g. 2018" dir="ltr" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>{isRtl ? "سنة التخرج *" : "Graduation Year *"}</label>
+                    <select className={inp(e.graduationYear, true)} value={e.graduationYear} onChange={ev => setEdu(i, "graduationYear", ev.target.value)} dir="ltr">
+                      <option value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                      {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    {errMsg(e.graduationYear, isRtl ? "سنة التخرج مطلوبة" : "Graduation year is required")}
+                  </div>
+                  <div>
+                    <label className={labelCls}>{isRtl ? "المعدل GPA" : "GPA"}</label>
+                    <input className={inputCls} value={e.gpa} onChange={ev => setEdu(i, "gpa", ev.target.value)} placeholder={isRtl ? "مثال: 3.6/4 أو جيد جداً" : "e.g. 3.6/4 or Very Good"} dir={isRtl ? "rtl" : "ltr"} />
+                    <p className="text-[10px] text-[#7A8FAA] mt-1">{isRtl ? "مفيد خصوصاً للخريجين الجدد والمستوى junior" : "Helpful for fresh graduates and junior candidates"}</p>
+                  </div>
                 </div>
               </div>
             ))}
@@ -1291,6 +1476,7 @@ export default function ResumeForm() {
                 { label: isRtl ? "الهاتف"                 : "Phone",         value: `${form.phoneCode} ${form.phone}`.trim() },
                 { label: isRtl ? "بريد السيرة الذاتية"    : "CV Email",      value: form.cvEmail },
                 { label: isRtl ? "الجنسية"                : "Nationality",   value: form.nationality },
+                { label: isRtl ? "مكان الإقامة"           : "Location",      value: form.location },
                 { label: isRtl ? "المسمى الوظيفي"         : "Target Job",    value: form.targetJob },
                 { label: isRtl ? "عدد الوظائف"            : "Jobs Added",    value: `${form.work.length}` },
                 { label: isRtl ? "عدد الشهادات الأكاديمية": "Degrees Added", value: `${form.education.length}` },
