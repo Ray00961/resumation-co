@@ -1154,8 +1154,7 @@ export default function ResumeForm() {
                         {isRtl ? "أجب على هذه الأسئلة لتقوية سيرتك الذاتية" : "Answer these questions to improve your CV"}
                       </p>
                       <div className={`space-y-2 ${isRtl ? "pl-2" : "pr-4"}`}>
-                        {aiTips[i].split("
-").filter(l => l.trim()).map((question, qIdx) => (
+                        {aiTips[i].split("\n").filter(l => l.trim()).map((question, qIdx) => (
                           <p key={qIdx} className="text-[12px] text-[#C8BFBA] leading-relaxed">
                             <span className="text-[#12B2C1] font-mono">{qIdx + 1}.</span> {question}
                           </p>
@@ -1165,18 +1164,12 @@ export default function ResumeForm() {
                         type="button"
                         onClick={() => {
                           const questionsText = aiTips[i]
-                            .split("
-")
+                            .split("\n")
                             .filter(l => l.trim())
-                            .map(q => `${q}
-${isRtl ? "الإجابة: " : "Answer: "}`)
-                            .join("
-
-");
+                            .map(q => `${q}\n${isRtl ? "الإجابة: " : "Answer: "}`)
+                            .join("\n\n");
                           const nextText = w.responsibilities.trim()
-                            ? `${w.responsibilities.trim()}
-
-${questionsText}`
+                            ? `${w.responsibilities.trim()}\n\n${questionsText}`
                             : questionsText;
                           setWork(i, "responsibilities", nextText);
                         }}
