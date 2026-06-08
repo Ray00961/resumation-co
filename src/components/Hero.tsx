@@ -239,42 +239,43 @@ export default function Hero() {
   }, [currentLang, c.typed]);
 
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
       try {
-        const [g, u, c] = await Promise.allSettled([
-          supabase
-            .from("order_generations")
-            .select("generation_id", { count: "exact", head: true }),
+        const { data, error } = await supabase.functions.invoke("public-platform-stats");
 
-          supabase
-            .from("users")
-            .select("*", { count: "exact", head: true }),
+        if (!mounted) return;
 
-          supabase
-            .from("hunter_companies")
-            .select("*", { count: "exact", head: true }),
-        ]);
+        if (error) {
+          throw error;
+        }
 
         setTargetCounts({
-          resumes:
-            g.status === "fulfilled"
-              ? (g.value.count ?? 0)
-              : 0,
+          resumes: Number(data?.resumes ?? 0),
+          users: Number(data?.users ?? 0),
+          companies: Number(data?.companies ?? 0),
+        });
+      } catch (error) {
+        console.error("Failed to load public platform stats:", error);
 
-          users:
-            u.status === "fulfilled"
-              ? (u.value.count ?? 0)
-              : 0,
+        if (!mounted) return;
 
-          companies:
-            c.status === "fulfilled"
-              ? (c.value.count ?? 0)
-              : 0,
+        setTargetCounts({
+          resumes: 0,
+          users: 0,
+          companies: 0,
         });
       } finally {
-        setStatsLoading(false);
+        if (mounted) {
+          setStatsLoading(false);
+        }
       }
     })();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
