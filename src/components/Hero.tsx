@@ -243,13 +243,17 @@ export default function Hero() {
 
     (async () => {
       try {
-        const { data, error } = await supabase.functions.invoke("public-platform-stats");
+        const res = await fetch(
+          "https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/public-platform-stats",
+        );
 
         if (!mounted) return;
 
-        if (error) {
-          throw error;
+        if (!res.ok) {
+          throw new Error(`Stats request failed: ${res.status}`);
         }
+
+        const data = await res.json();
 
         setTargetCounts({
           resumes: Number(data?.resumes ?? 0),
