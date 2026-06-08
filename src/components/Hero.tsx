@@ -241,7 +241,7 @@ export default function Hero() {
   useEffect(() => {
     (async () => {
       try {
-        const [g, u, c] = await Promise.all([
+        const [g, u, c] = await Promise.allSettled([
           supabase
             .from("order_generations")
             .select("generation_id", { count: "exact", head: true }),
@@ -256,12 +256,21 @@ export default function Hero() {
         ]);
 
         setTargetCounts({
-          resumes: g.count ?? 0,
-          users: u.count ?? 0,
-          companies: c.count ?? 0,
+          resumes:
+            g.status === "fulfilled"
+              ? (g.value.count ?? 0)
+              : 0,
+
+          users:
+            u.status === "fulfilled"
+              ? (u.value.count ?? 0)
+              : 0,
+
+          companies:
+            c.status === "fulfilled"
+              ? (c.value.count ?? 0)
+              : 0,
         });
-      } catch {
-        // use defaults
       } finally {
         setStatsLoading(false);
       }
