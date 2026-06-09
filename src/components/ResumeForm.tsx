@@ -1447,7 +1447,7 @@ export default function ResumeForm() {
                 <div key={key} className="mb-3">
                   <label className={labelCls}>{label}</label>
                   <select
-                    className={`${inputCls} cursor-pointer`}
+                    className={`${inputCls} cursor-pointer bg-[#111827] text-[#F5F0E9]`}
                     value={form[key as keyof FormState] as string}
                     onChange={e => set(key as keyof FormState, e.target.value)}
                   >
