@@ -734,7 +734,7 @@ export default function ResumeForm() {
     setTitleLoading(prev => ({ ...prev, [workId]: true }));
 
     try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/suggest-job-titles`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/suggest-position-titles`, {
         method: "POST",
         headers: {
           "apikey": SUPABASE_KEY,
@@ -1164,6 +1164,23 @@ export default function ResumeForm() {
               {errMsg(form.fullName, isRtl ? "الاسم مطلوب" : "Full name is required")}
             </div>
 
+            {(needsArabicName || form.fullNameArabic.trim()) && (
+              <div>
+                <label className={labelCls}>{isRtl ? "الاسم الكامل بالعربية *" : "Arabic Full Name *"}</label>
+                <input
+                  className={inp(form.fullNameArabic, needsArabicName)}
+                  value={form.fullNameArabic}
+                  onChange={e => set("fullNameArabic", e.target.value)}
+                  placeholder="مثال: أحمد محمد علي"
+                  dir="rtl"
+                />
+                <p className="text-[10px] text-[#7A8FAA] mt-1">
+                  {isRtl ? "يظهر هذا الحقل لأن موقعك داخل مصر أو تم إدخال اسم عربي." : "This appears for Egypt-based users so Arabic CVs and documents use the correct name."}
+                </p>
+                {needsArabicName && errMsg(form.fullNameArabic, isRtl ? "لأن موقعك داخل مصر، الاسم بالعربية مطلوب" : "Arabic name is required for Egypt-based users")}
+              </div>
+            )}
+
             <div>
               <label className={labelCls}>{isRtl ? "الجنس *" : "Gender *"}</label>
               <div className="grid grid-cols-2 gap-2">
@@ -1278,23 +1295,6 @@ export default function ResumeForm() {
               <input className={inp(form.location, true)} value={form.location} onChange={e => set("location", e.target.value)} placeholder={isRtl ? "مثال: بيروت، لبنان" : "e.g. Beirut, Lebanon"} />
               {errMsg(form.location, isRtl ? "مكان الإقامة مطلوب" : "Current location is required")}
             </div>
-
-            {(needsArabicName || form.fullNameArabic.trim()) && (
-              <div>
-                <label className={labelCls}>{isRtl ? "الاسم الكامل بالعربية *" : "Arabic Full Name *"}</label>
-                <input
-                  className={inp(form.fullNameArabic, needsArabicName)}
-                  value={form.fullNameArabic}
-                  onChange={e => set("fullNameArabic", e.target.value)}
-                  placeholder="مثال: أحمد محمد علي"
-                  dir="rtl"
-                />
-                <p className="text-[10px] text-[#7A8FAA] mt-1">
-                  {isRtl ? "يظهر هذا الحقل لأن موقعك داخل مصر أو تم إدخال اسم عربي." : "This appears for Egypt-based users so Arabic CVs and documents use the correct name."}
-                </p>
-                {needsArabicName && errMsg(form.fullNameArabic, isRtl ? "لأن موقعك داخل مصر، الاسم بالعربية مطلوب" : "Arabic name is required for Egypt-based users")}
-              </div>
-            )}
 
             <div>
               <label className={labelCls}>{isRtl ? "المسمى الوظيفي المستهدف *" : "Target Job Title *"}</label>
