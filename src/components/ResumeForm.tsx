@@ -6,7 +6,10 @@ import { Plus, Trash2, ChevronRight, ChevronLeft, ChevronDown, Loader2, Check, A
 
 interface WorkEntry {
   id: string;
+  jobTitleKnown: "yes" | "no";
   jobTitle: string;
+  roleDescription: string;
+  titleSuggestions: string[];
   company: string;
   location: string;
   startDate: string;
@@ -42,6 +45,8 @@ interface ProjectEntry {
 
 interface FormState {
   fullName: string;
+  fullNameArabic: string;
+  gender: string;
   phoneCode: string;
   phone: string;
   cvEmail: string;
@@ -63,7 +68,10 @@ interface FormState {
 
 const defaultWork: WorkEntry = {
   id: "",
+  jobTitleKnown: "yes",
   jobTitle: "",
+  roleDescription: "",
+  titleSuggestions: [],
   company: "",
   location: "",
   startDate: "",
@@ -287,6 +295,52 @@ const MONTH_OPTIONS = [
 
 const YEAR_OPTIONS = Array.from({ length: 70 }, (_, i) => String(new Date().getFullYear() + 1 - i));
 
+const EGYPT_LOCATION_PATTERNS = [
+  "egypt", "مصر", "cairo", "القاهرة", "alexandria", "الإسكندرية", "giza", "الجيزة",
+  "mansoura", "المنصورة", "dakahlia", "الدقهلية", "tanta", "طنطا", "aswan", "أسوان",
+  "assiut", "أسيوط", "luxor", "الأقصر", "suez", "السويس", "port said", "بورسعيد"
+];
+
+function isEgyptLocation(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  return EGYPT_LOCATION_PATTERNS.some(pattern => normalized.includes(pattern.toLowerCase()));
+}
+
+function fallbackTitleSuggestions(description: string, language: string): string[] {
+  const text = description.toLowerCase();
+  const ar = language === "ar";
+
+  if (text.includes("cv") || text.includes("resume") || text.includes("سيرة") || text.includes("jobs") || text.includes("job search") || text.includes("recruit")) {
+    return ar
+      ? ["أخصائي خدمات مهنية", "منسق توظيف ودعم عملاء", "أخصائي استقطاب مواهب", "كاتب سير ذاتية وخطابات تعريفية"]
+      : ["Career Services Specialist", "Recruitment & Client Support Coordinator", "Talent Sourcing Specialist", "CV & Cover Letter Writer"];
+  }
+  if (text.includes("customer") || text.includes("call") || text.includes("support") || text.includes("عميل") || text.includes("خدمة")) {
+    return ar
+      ? ["ممثل خدمة عملاء", "أخصائي دعم عملاء", "منسق علاقات عملاء", "موظف مركز اتصال"]
+      : ["Customer Service Representative", "Customer Support Specialist", "Client Relations Coordinator", "Call Center Agent"];
+  }
+  if (text.includes("sales") || text.includes("sell") || text.includes("مبيعات")) {
+    return ar
+      ? ["أخصائي مبيعات", "مندوب مبيعات", "تنفيذي مبيعات", "منسق تطوير أعمال"]
+      : ["Sales Specialist", "Sales Representative", "Sales Executive", "Business Development Coordinator"];
+  }
+  if (text.includes("data") || text.includes("entry") || text.includes("excel") || text.includes("بيانات")) {
+    return ar
+      ? ["مدخل بيانات", "أخصائي إدخال بيانات", "مساعد إداري للبيانات", "منسق بيانات"]
+      : ["Data Entry Specialist", "Data Entry Clerk", "Administrative Data Assistant", "Data Coordinator"];
+  }
+  if (text.includes("admin") || text.includes("office") || text.includes("secretary") || text.includes("إداري") || text.includes("مكتب")) {
+    return ar
+      ? ["مساعد إداري", "منسق إداري", "موظف إداري", "مساعد مكتب"]
+      : ["Administrative Assistant", "Administrative Coordinator", "Office Administrator", "Office Assistant"];
+  }
+  return ar
+    ? ["أخصائي عمليات", "منسق إداري", "مساعد إداري", "أخصائي دعم أعمال"]
+    : ["Operations Specialist", "Administrative Coordinator", "Administrative Assistant", "Business Support Specialist"];
+}
+
 function composeMonthYear(month: string, year: string) {
   if (!month && !year) return "";
   if (month && year) return `${month}/${year}`;
@@ -310,6 +364,9 @@ function normalizeWorkEntry(raw: Partial<WorkEntry> = {}): WorkEntry {
     ...defaultWork,
     ...raw,
     id: raw.id || generateId(10),
+    jobTitleKnown: raw.jobTitleKnown || (raw.roleDescription ? "no" : "yes"),
+    roleDescription: raw.roleDescription || "",
+    titleSuggestions: Array.isArray(raw.titleSuggestions) ? raw.titleSuggestions : [],
     startMonth: raw.startMonth || start.month,
     startYear: raw.startYear || start.year,
     endMonth: raw.endMonth || (isCurrent ? "" : end.month),
@@ -387,6 +444,8 @@ export default function ResumeForm() {
   const [aiLoading, setAiLoading]                 = useState<Record<string, boolean>>({});
   const [aiTips, setAiTips]                       = useState<Record<string, string>>({});
   const [aiErrors, setAiErrors]                   = useState<Record<string, string>>({});
+  const [titleLoading, setTitleLoading]           = useState<Record<string, boolean>>({});
+  const [titleErrors, setTitleErrors]             = useState<Record<string, string>>({});
   const phoneDropdownRef = useRef<HTMLDivElement>(null);
 
   // ── Save progress ──
@@ -409,7 +468,7 @@ export default function ResumeForm() {
   }, [phoneDropdownOpen]);
 
   const [form, setForm] = useState<FormState>({
-    fullName: "", phoneCode: "+961", phone: "", cvEmail: "",
+    fullName: "", fullNameArabic: "", gender: "", phoneCode: "+961", phone: "", cvEmail: "",
     linkedin: "", nationality: "", location: "", targetJob: "",
     work: [createDefaultWork()],
     education: [{ ...defaultEdu }],
@@ -491,6 +550,8 @@ export default function ResumeForm() {
           setForm(prev => ({
             ...prev,
             fullName:    cv.fullName    || "",
+            fullNameArabic: cv.fullNameArabic || cv.full_name_ar || "",
+            gender: cv.gender || "",
             phoneCode,
             phone:       phoneNum,
             cvEmail:     cv.cvEmail     || userEmail,
@@ -537,6 +598,8 @@ export default function ResumeForm() {
           const { form: savedForm, step: savedStep } = JSON.parse(rawDraft);
           setForm({
             ...savedForm,
+            fullNameArabic: savedForm.fullNameArabic || "",
+            gender: savedForm.gender || "",
             location: savedForm.location || "",
             work: Array.isArray(savedForm.work) && savedForm.work.length
               ? savedForm.work.map((w: Partial<WorkEntry>) => normalizeWorkEntry(w))
@@ -583,10 +646,32 @@ export default function ResumeForm() {
   }, [form, step, userId, isEditMode, draftLoaded]);
 
   // ── Validation ──
+  const needsArabicName = isEgyptLocation(form.location);
+
   const isStepValid = () => {
     switch (step) {
-      case 1: return form.fullName.trim() !== "" && form.phone.trim() !== "" && form.cvEmail.trim() !== "" && form.nationality.trim() !== "" && form.location.trim() !== "" && form.targetJob.trim() !== "";
-      case 2: return form.work.every(w => w.jobTitle.trim() !== "" && w.company.trim() !== "" && w.startMonth.trim() !== "" && w.startYear.trim() !== "" && (w.isCurrent || (w.endMonth.trim() !== "" && w.endYear.trim() !== "")) && w.responsibilities.trim() !== "");
+      case 1:
+        return form.fullName.trim() !== ""
+          && form.gender.trim() !== ""
+          && (!needsArabicName || form.fullNameArabic.trim() !== "")
+          && form.phone.trim() !== ""
+          && form.cvEmail.trim() !== ""
+          && form.nationality.trim() !== ""
+          && form.location.trim() !== ""
+          && form.targetJob.trim() !== "";
+      case 2:
+        return form.work.every(w => {
+          const hasProfessionalTitle = w.jobTitleKnown === "yes"
+            ? w.jobTitle.trim() !== ""
+            : w.roleDescription.trim() !== "" && w.jobTitle.trim() !== "";
+
+          return hasProfessionalTitle
+            && w.company.trim() !== ""
+            && w.startMonth.trim() !== ""
+            && w.startYear.trim() !== ""
+            && (w.isCurrent || (w.endMonth.trim() !== "" && w.endYear.trim() !== ""))
+            && w.responsibilities.trim() !== "";
+        });
       case 3: return form.education.every(e => e.degree.trim() !== "" && e.major.trim() !== "" && e.university.trim() !== "" && e.graduationYear.trim() !== "");
       case 4: return form.technicalSkills.length > 0;
       case 5: return true;
@@ -604,7 +689,7 @@ export default function ResumeForm() {
   const set = (field: keyof FormState, value: unknown) =>
     setForm(prev => ({ ...prev, [field]: value }));
 
-  const setWork = (i: number, field: keyof WorkEntry, value: string) =>
+  const setWork = <K extends keyof WorkEntry>(i: number, field: K, value: WorkEntry[K]) =>
     setForm(prev => { const work = [...prev.work]; work[i] = { ...work[i], [field]: value }; return { ...prev, work }; });
 
   const setEdu = (i: number, field: keyof EducationEntry, value: string) =>
@@ -616,31 +701,70 @@ export default function ResumeForm() {
   const setProj = (i: number, field: keyof ProjectEntry, value: string) =>
     setForm(prev => { const projects = [...prev.projects]; projects[i] = { ...projects[i], [field]: value }; return { ...prev, projects }; });
 
-  // ── AI Questions Engine ──
-  const fallbackQuestions = (jobTitle: string) => {
-    if (isRtl) {
-      return [
-        `ما أهم المهام اليومية التي كنت تقوم بها في وظيفة ${jobTitle}?`,
-        "هل كنت تتعامل مع عملاء، مرضى، موردين، أو فريق عمل؟ كم تقريباً؟",
-        "ما الأدوات أو الأنظمة أو البرامج التي كنت تستخدمها؟",
-        "هل كان لديك هدف شهري أو مؤشرات أداء؟ اكتب الأرقام إن وجدت.",
-        "هل ساعدت في تحسين نتيجة معينة مثل الوقت، الجودة، المبيعات، أو رضا العملاء؟",
-        "هل كنت تعمل ضمن فريق أو تدير أشخاصاً؟ كم كان عددهم؟",
-      ].join("\n");
-    }
+  const generateTitleSuggestions = async (workId: string, roleDescription: string, company: string) => {
+    if (!roleDescription.trim()) return;
 
-    return [
-      `What were your main daily responsibilities as a ${jobTitle}?`,
-      "Did you work with customers, patients, suppliers, or internal teams? Approximately how many?",
-      "Which tools, systems, software, or platforms did you use?",
-      "Did you have monthly targets or performance indicators? Add numbers if available.",
-      "Did you improve anything such as time, quality, sales, service, or customer satisfaction?",
-      "Did you work within a team or manage people? How many?",
-    ].join("\n");
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+    const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const lsKey = Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token"));
+    const accessToken = lsKey
+      ? (JSON.parse(localStorage.getItem(lsKey) || "null")?.access_token ?? null)
+      : null;
+
+    setTitleErrors(prev => {
+      const next = { ...prev };
+      delete next[workId];
+      return next;
+    });
+    setTitleLoading(prev => ({ ...prev, [workId]: true }));
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/suggest-job-titles`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${accessToken ?? SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ roleDescription, company, language: lang }),
+      });
+
+      let titles: string[] = [];
+      if (res.ok) {
+        const data = await res.json();
+        titles = Array.isArray(data?.titles) ? data.titles.map((t: unknown) => String(t).trim()).filter(Boolean) : [];
+      }
+
+      if (!titles.length) {
+        titles = fallbackTitleSuggestions(roleDescription, lang);
+      }
+
+      setForm(prev => ({
+        ...prev,
+        work: prev.work.map(w => w.id === workId ? { ...w, titleSuggestions: titles.slice(0, 5) } : w),
+      }));
+    } catch {
+      const titles = fallbackTitleSuggestions(roleDescription, lang);
+      setForm(prev => ({
+        ...prev,
+        work: prev.work.map(w => w.id === workId ? { ...w, titleSuggestions: titles.slice(0, 5) } : w),
+      }));
+      setTitleErrors(prev => ({
+        ...prev,
+        [workId]: isRtl ? "استخدمنا اقتراحات افتراضية. يمكنك اختيار الأنسب أو تعديله." : "We used default suggestions. Choose the closest one or edit it.",
+      }));
+    } finally {
+      setTitleLoading(prev => {
+        const next = { ...prev };
+        delete next[workId];
+        return next;
+      });
+    }
   };
 
+  // ── AI Questions Engine ──
   const generateQuestions = async (workId: string, jobTitle: string, company: string) => {
-    if (!workId || !jobTitle.trim()) return;
+    if (!jobTitle.trim()) return;
 
     const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
     const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -662,9 +786,10 @@ export default function ResumeForm() {
     setAiLoading(prev => ({ ...prev, [workId]: true }));
 
     const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 25000);
 
     try {
-      const request = fetch(`${SUPABASE_URL}/functions/v1/generate-cv-bullets`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-cv-bullets`, {
         method: "POST",
         headers: {
           "apikey": SUPABASE_KEY,
@@ -674,15 +799,6 @@ export default function ResumeForm() {
         body: JSON.stringify({ jobTitle, company, language: lang }),
         signal: controller.signal,
       });
-
-      const timeout = new Promise<never>((_, reject) => {
-        window.setTimeout(() => {
-          controller.abort();
-          reject(new Error("AI request timed out"));
-        }, 22000);
-      });
-
-      const res = await Promise.race([request, timeout]);
 
       if (!res.ok) {
         const text = await res.text();
@@ -698,14 +814,12 @@ export default function ResumeForm() {
 
       setAiTips(prev => ({ ...prev, [workId]: content }));
     } catch (err: any) {
-      console.error("AI questions error:", err);
-      const message = err?.message === "AI request timed out" || err?.name === "AbortError"
-        ? (isRtl ? "استغرق إنشاء الأسئلة وقتاً طويلاً. عرضنا لك أسئلة مساعدة مؤقتة." : "Creating questions took too long. We added helpful fallback questions.")
-        : (isRtl ? "تعذر إنشاء الأسئلة حالياً. عرضنا لك أسئلة مساعدة مؤقتة." : "Could not create AI questions right now. We added helpful fallback questions.");
-
+      const message = err?.name === "AbortError"
+        ? (isRtl ? "استغرق إنشاء الأسئلة وقتاً طويلاً. حاول مرة أخرى." : "Creating questions took too long. Please try again.")
+        : (isRtl ? "لم نتمكن من إنشاء الأسئلة. حاول مرة أخرى." : "We could not create questions. Please try again.");
       setAiErrors(prev => ({ ...prev, [workId]: message }));
-      setAiTips(prev => ({ ...prev, [workId]: fallbackQuestions(jobTitle.trim()) }));
     } finally {
+      window.clearTimeout(timeoutId);
       setAiLoading(prev => {
         const next = { ...prev };
         delete next[workId];
@@ -736,6 +850,8 @@ export default function ResumeForm() {
 
     const cvData = {
       fullName:        form.fullName,
+      fullNameArabic:  form.fullNameArabic,
+      gender:          form.gender,
       phone:           fullPhone,
       cvEmail:         form.cvEmail,
       linkedin:        form.linkedin,
@@ -943,7 +1059,7 @@ export default function ResumeForm() {
               onClick={() => {
                 if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
                 setDraftRestored(false);
-                setForm({ fullName: "", phoneCode: "+961", phone: "", cvEmail: "", linkedin: "", nationality: "", location: "", targetJob: "", work: [createDefaultWork()], education: [{ ...defaultEdu }], technicalSkills: [], langArabic: "", langEnglish: "", langFrench: "", langOther: "", certificates: [], projects: [], agreedToTerms: false });
+                setForm({ fullName: "", fullNameArabic: "", gender: "", phoneCode: "+961", phone: "", cvEmail: "", linkedin: "", nationality: "", location: "", targetJob: "", work: [createDefaultWork()], education: [{ ...defaultEdu }], technicalSkills: [], langArabic: "", langEnglish: "", langFrench: "", langOther: "", certificates: [], projects: [], agreedToTerms: false });
                 setStep(1);
               }}
               className="text-[#7A8FAA] hover:text-red-400 font-semibold transition-colors uppercase tracking-wider text-[10px]"
@@ -1003,11 +1119,58 @@ export default function ResumeForm() {
         ══════════════════════════════════════ */}
         {step === 1 && (
           <div className={sectionCls}>
+            <div className="rounded-xl border border-[rgba(18,178,193,0.22)] bg-[rgba(18,178,193,0.045)] p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[12px] font-bold text-[#E0C58F] uppercase tracking-wider">
+                    {isRtl ? "استيراد البيانات" : "Import your profile"}
+                  </p>
+                  <p className="text-[12px] text-[#A8B4CC] leading-relaxed mt-1">
+                    {isRtl ? "قريباً يمكنك رفع سيرتك الحالية لملء هذا النموذج تلقائياً. حالياً أكمل البيانات يدوياً لضمان أفضل نتيجة." : "Soon you will be able to upload your existing CV to auto-fill this form. For now, complete the fields manually for best results."}
+                  </p>
+                </div>
+                <span className="px-2 py-1 rounded-full bg-[rgba(224,197,143,0.12)] text-[#E0C58F] text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">
+                  {isRtl ? "قريباً" : "Soon"}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button type="button" disabled className="px-3 py-2 rounded-lg border border-[rgba(86,108,158,0.28)] bg-[rgba(86,108,158,0.08)] text-[#7A8FAA] text-[12px] cursor-not-allowed">
+                  {isRtl ? "رفع CV PDF/DOCX" : "Upload CV PDF/DOCX"}
+                </button>
+                <button type="button" disabled className="px-3 py-2 rounded-lg border border-[rgba(86,108,158,0.28)] bg-[rgba(86,108,158,0.08)] text-[#7A8FAA] text-[12px] cursor-not-allowed">
+                  {isRtl ? "استيراد LinkedIn" : "LinkedIn Import"}
+                </button>
+              </div>
+            </div>
             <div>
               <label className={labelCls}>{isRtl ? "الاسم الكامل *" : "Full Name *"}</label>
               <input className={inp(form.fullName, true)} value={form.fullName} onChange={e => set("fullName", e.target.value)} placeholder={isRtl ? "مثال: أحمد خليل" : "e.g. Ahmad Khalil"} onFocus={() => setActiveField("fullName")} onBlur={() => setActiveField(null)} />
               <SuggestBox fieldKey="fullName" onSelect={v => set("fullName", v)} />
               {errMsg(form.fullName, isRtl ? "الاسم مطلوب" : "Full name is required")}
+            </div>
+
+            <div>
+              <label className={labelCls}>{isRtl ? "الجنس *" : "Gender *"}</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { value: "male", en: "Male", ar: "ذكر" },
+                  { value: "female", en: "Female", ar: "أنثى" },
+                ].map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => set("gender", opt.value)}
+                    className={`px-4 py-2.5 rounded-lg border text-sm font-semibold transition-all ${form.gender === opt.value ? "bg-[rgba(18,178,193,0.16)] border-[rgba(18,178,193,0.65)] text-[#12B2C1]" : "bg-[rgba(86,108,158,0.12)] border-[rgba(86,108,158,0.35)] text-[#D9CBC2] hover:border-[rgba(18,178,193,0.45)]"}`}
+                  >
+                    {isRtl ? opt.ar : opt.en}
+                  </button>
+                ))}
+              </div>
+              {showErrors && form.gender.trim() === "" && (
+                <p className="flex items-center gap-1 text-[12px] text-red-400 mt-1">
+                  <AlertCircle size={11} /> {isRtl ? "الجنس مطلوب لتحسين صياغة السيرة العربية" : "Gender is required for accurate Arabic wording"}
+                </p>
+              )}
             </div>
 
             <div>
@@ -1101,6 +1264,23 @@ export default function ResumeForm() {
               {errMsg(form.location, isRtl ? "مكان الإقامة مطلوب" : "Current location is required")}
             </div>
 
+            {(needsArabicName || form.fullNameArabic.trim()) && (
+              <div>
+                <label className={labelCls}>{isRtl ? "الاسم الكامل بالعربية *" : "Arabic Full Name *"}</label>
+                <input
+                  className={inp(form.fullNameArabic, needsArabicName)}
+                  value={form.fullNameArabic}
+                  onChange={e => set("fullNameArabic", e.target.value)}
+                  placeholder="مثال: أحمد محمد علي"
+                  dir="rtl"
+                />
+                <p className="text-[10px] text-[#7A8FAA] mt-1">
+                  {isRtl ? "يظهر هذا الحقل لأن موقعك داخل مصر أو تم إدخال اسم عربي." : "This appears for Egypt-based users so Arabic CVs and documents use the correct name."}
+                </p>
+                {needsArabicName && errMsg(form.fullNameArabic, isRtl ? "لأن موقعك داخل مصر، الاسم بالعربية مطلوب" : "Arabic name is required for Egypt-based users")}
+              </div>
+            )}
+
             <div>
               <label className={labelCls}>{isRtl ? "المسمى الوظيفي المستهدف *" : "Target Job Title *"}</label>
               <input className={inp(form.targetJob, true)} value={form.targetJob} onChange={e => set("targetJob", e.target.value)} placeholder={isRtl ? "مثال: مدير تسويق أول" : "e.g. Senior Marketing Manager"} onFocus={() => setActiveField("targetJob")} onBlur={() => setActiveField(null)} />
@@ -1128,11 +1308,99 @@ export default function ResumeForm() {
                   )}
                 </div>
 
-                <div>
-                  <label className={labelCls}>{isRtl ? "المسمى الوظيفي *" : "Job Title *"}</label>
-                  <input className={inp(w.jobTitle, true)} value={w.jobTitle} onChange={e => setWork(i, "jobTitle", e.target.value)} placeholder={isRtl ? "مثال: مدير تسويق" : "e.g. Marketing Manager"} onFocus={() => setActiveField(`jobTitle_${i}`)} onBlur={() => setActiveField(null)} />
-                  <SuggestBox fieldKey="jobTitle" onSelect={v => { setWork(i, "jobTitle", v); setActiveField(null); }} />
-                  {errMsg(w.jobTitle, isRtl ? "المسمى الوظيفي مطلوب" : "Job title is required")}
+                <div className="space-y-3">
+                  <div>
+                    <label className={labelCls}>{isRtl ? "هل تعرف المسمى الوظيفي الرسمي الذي كنت تشغله؟ *" : "Do you know your official job title? *"}</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { value: "yes", en: "Yes, I know it", ar: "نعم، أعرفه" },
+                        { value: "no", en: "No, help me choose", ar: "لا، ساعدني أختار" },
+                      ].map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            setWork(i, "jobTitleKnown", opt.value as WorkEntry["jobTitleKnown"]);
+                            if (opt.value === "yes") {
+                              setWork(i, "roleDescription", "");
+                              setWork(i, "titleSuggestions", []);
+                            }
+                          }}
+                          className={`px-3 py-2.5 rounded-lg border text-[12px] font-semibold transition-all ${w.jobTitleKnown === opt.value ? "bg-[rgba(18,178,193,0.16)] border-[rgba(18,178,193,0.65)] text-[#12B2C1]" : "bg-[rgba(86,108,158,0.12)] border-[rgba(86,108,158,0.35)] text-[#D9CBC2] hover:border-[rgba(18,178,193,0.45)]"}`}
+                        >
+                          {isRtl ? opt.ar : opt.en}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {w.jobTitleKnown === "yes" ? (
+                    <div>
+                      <label className={labelCls}>{isRtl ? "المسمى الوظيفي الرسمي *" : "Official Job Title *"}</label>
+                      <input className={inp(w.jobTitle, true)} value={w.jobTitle} onChange={e => setWork(i, "jobTitle", e.target.value)} placeholder={isRtl ? "مثال: أخصائي خدمة عملاء" : "e.g. Customer Service Specialist"} onFocus={() => setActiveField(`jobTitle_${i}`)} onBlur={() => setActiveField(null)} />
+                      <SuggestBox fieldKey="jobTitle" onSelect={v => { setWork(i, "jobTitle", v); setActiveField(null); }} />
+                      {errMsg(w.jobTitle, isRtl ? "المسمى الوظيفي مطلوب" : "Job title is required")}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div>
+                        <label className={labelCls}>{isRtl ? "اشرح المهام التي كنت تقوم بها *" : "Describe what you actually did *"}</label>
+                        <textarea
+                          className={`${inp(w.roleDescription, true)} h-24 resize-none`}
+                          value={w.roleDescription}
+                          onChange={e => setWork(i, "roleDescription", e.target.value)}
+                          placeholder={isRtl ? "مثال: كنت أبحث عن وظائف للعملاء، أكتب السير الذاتية، أتواصل مع العملاء، وأدخل بيانات المرشحين..." : "Example: I searched for jobs for clients, wrote CVs, contacted customers, entered candidate data, and coordinated applications..."}
+                        />
+                        {errMsg(w.roleDescription, isRtl ? "اشرح مهامك حتى نقترح المسمى الأنسب" : "Describe your tasks so we can suggest the best title")}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={!w.roleDescription.trim() || Boolean(titleLoading[w.id])}
+                        onClick={() => generateTitleSuggestions(w.id, w.roleDescription, w.company)}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-[rgba(18,178,193,0.08)] border border-[rgba(18,178,193,0.3)] text-[rgba(18,178,193,0.95)] hover:bg-[rgba(18,178,193,0.16)] transition-all disabled:opacity-45 disabled:cursor-not-allowed text-[12px] font-semibold"
+                      >
+                        {titleLoading[w.id]
+                          ? <><Loader2 size={12} className="animate-spin" /> {isRtl ? "جاري اقتراح المسميات..." : "Suggesting titles..."}</>
+                          : <><Sparkles size={12} /> {isRtl ? "اقترح مسميات وظيفية" : "Suggest professional titles"}</>
+                        }
+                      </button>
+
+                      {titleErrors[w.id] && (
+                        <p className="flex items-center gap-1 text-[12px] text-[#E0C58F]">
+                          <AlertCircle size={11} /> {titleErrors[w.id]}
+                        </p>
+                      )}
+
+                      {w.titleSuggestions.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-[11px] text-[#7A8FAA] font-semibold uppercase tracking-wider">
+                            {isRtl ? "اختر المسمى الأنسب ليظهر في السيرة الذاتية" : "Choose the best title for your CV"}
+                          </p>
+                          <div className="grid gap-2">
+                            {w.titleSuggestions.map(title => (
+                              <button
+                                key={title}
+                                type="button"
+                                onClick={() => setWork(i, "jobTitle", title)}
+                                className={`text-left px-3 py-2 rounded-lg border text-[12px] transition-all ${w.jobTitle === title ? "bg-[rgba(18,178,193,0.16)] border-[rgba(18,178,193,0.65)] text-[#12B2C1]" : "bg-[rgba(86,108,158,0.1)] border-[rgba(86,108,158,0.28)] text-[#D9CBC2] hover:border-[rgba(18,178,193,0.45)]"}`}
+                              >
+                                {title}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            className={inp(w.jobTitle, true)}
+                            value={w.jobTitle}
+                            onChange={e => setWork(i, "jobTitle", e.target.value)}
+                            placeholder={isRtl ? "أو عدّل المسمى المختار" : "Or edit the selected title"}
+                            dir={isRtl ? "rtl" : "ltr"}
+                          />
+                          {errMsg(w.jobTitle, isRtl ? "اختر أو اكتب مسمى وظيفي احترافي" : "Choose or write a professional job title")}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1151,17 +1419,17 @@ export default function ResumeForm() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>{isRtl ? "شهر البداية *" : "Start Month *"}</label>
-                    <select className={`${selectInp(w.startMonth, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={w.startMonth} onChange={e => setWork(i, "startMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
-                      <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
-                      {MONTH_OPTIONS.map(m => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={m.value} value={m.value}>{`${m.value} - ${isRtl ? m.ar : m.en}`}</option>)}
+                    <select className={selectInp(w.startMonth, true)} value={w.startMonth} onChange={e => setWork(i, "startMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
+                      <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
+                      {MONTH_OPTIONS.map(m => <option className="bg-[#172033] text-[#F5F0E9]" key={m.value} value={m.value}>{`${m.value} - ${isRtl ? m.ar : m.en}`}</option>)}
                     </select>
                     {errMsg(w.startMonth, isRtl ? "شهر البداية مطلوب" : "Start month is required")}
                   </div>
                   <div>
                     <label className={labelCls}>{isRtl ? "سنة البداية *" : "Start Year *"}</label>
-                    <select className={`${selectInp(w.startYear, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={w.startYear} onChange={e => setWork(i, "startYear", e.target.value)} dir="ltr">
-                      <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر السنة" : "Select year"}</option>
-                      {YEAR_OPTIONS.map(y => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={y} value={y}>{y}</option>)}
+                    <select className={selectInp(w.startYear, true)} value={w.startYear} onChange={e => setWork(i, "startYear", e.target.value)} dir="ltr">
+                      <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                      {YEAR_OPTIONS.map(y => <option className="bg-[#172033] text-[#F5F0E9]" key={y} value={y}>{y}</option>)}
                     </select>
                     {errMsg(w.startYear, isRtl ? "سنة البداية مطلوبة" : "Start year is required")}
                   </div>
@@ -1189,17 +1457,17 @@ export default function ResumeForm() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className={labelCls}>{isRtl ? "شهر النهاية *" : "End Month *"}</label>
-                      <select className={`${selectInp(w.endMonth, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={w.endMonth} onChange={e => setWork(i, "endMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
-                        <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
-                        {MONTH_OPTIONS.map(m => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={m.value} value={m.value}>{`${m.value} - ${isRtl ? m.ar : m.en}`}</option>)}
+                      <select className={selectInp(w.endMonth, true)} value={w.endMonth} onChange={e => setWork(i, "endMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
+                        <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
+                        {MONTH_OPTIONS.map(m => <option className="bg-[#172033] text-[#F5F0E9]" key={m.value} value={m.value}>{`${m.value} - ${isRtl ? m.ar : m.en}`}</option>)}
                       </select>
                       {errMsg(w.endMonth, isRtl ? "شهر النهاية مطلوب" : "End month is required")}
                     </div>
                     <div>
                       <label className={labelCls}>{isRtl ? "سنة النهاية *" : "End Year *"}</label>
-                      <select className={`${selectInp(w.endYear, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={w.endYear} onChange={e => setWork(i, "endYear", e.target.value)} dir="ltr">
-                        <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر السنة" : "Select year"}</option>
-                        {YEAR_OPTIONS.map(y => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={y} value={y}>{y}</option>)}
+                      <select className={selectInp(w.endYear, true)} value={w.endYear} onChange={e => setWork(i, "endYear", e.target.value)} dir="ltr">
+                        <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                        {YEAR_OPTIONS.map(y => <option className="bg-[#172033] text-[#F5F0E9]" key={y} value={y}>{y}</option>)}
                       </select>
                       {errMsg(w.endYear, isRtl ? "سنة النهاية مطلوبة" : "End year is required")}
                     </div>
@@ -1332,9 +1600,9 @@ export default function ResumeForm() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>{isRtl ? "سنة التخرج *" : "Graduation Year *"}</label>
-                    <select className={`${selectInp(e.graduationYear, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={e.graduationYear} onChange={ev => setEdu(i, "graduationYear", ev.target.value)} dir="ltr">
-                      <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر السنة" : "Select year"}</option>
-                      {YEAR_OPTIONS.map(y => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={y} value={y}>{y}</option>)}
+                    <select className={selectInp(e.graduationYear, true)} value={e.graduationYear} onChange={ev => setEdu(i, "graduationYear", ev.target.value)} dir="ltr">
+                      <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                      {YEAR_OPTIONS.map(y => <option className="bg-[#172033] text-[#F5F0E9]" key={y} value={y}>{y}</option>)}
                     </select>
                     {errMsg(e.graduationYear, isRtl ? "سنة التخرج مطلوبة" : "Graduation year is required")}
                   </div>
@@ -1479,13 +1747,12 @@ export default function ResumeForm() {
                 <div key={key} className="mb-3">
                   <label className={labelCls}>{label}</label>
                   <select
-                    className={`${inputCls} cursor-pointer bg-[#111827] text-[#F5F0E9] [color-scheme:dark]`}
-                    style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }}
+                    className={`${inputCls} cursor-pointer bg-[#111827] text-[#F5F0E9]`}
                     value={form[key as keyof FormState] as string}
                     onChange={e => set(key as keyof FormState, e.target.value)}
                   >
                     {langOptions.map(o => (
-                      <option key={o.value} value={o.value} style={{ backgroundColor: "#172033", color: "#F5F0E9" }}>{o.label}</option>
+                      <option key={o.value} value={o.value} className="bg-[#0D1117]">{o.label}</option>
                     ))}
                   </select>
                 </div>
@@ -1564,6 +1831,8 @@ export default function ResumeForm() {
             <div className="space-y-1">
               {[
                 { label: isRtl ? "الاسم"                  : "Name",          value: form.fullName },
+                { label: isRtl ? "الاسم بالعربية"        : "Arabic Name",   value: form.fullNameArabic },
+                { label: isRtl ? "الجنس"                 : "Gender",        value: form.gender ? (form.gender === "female" ? (isRtl ? "أنثى" : "Female") : (isRtl ? "ذكر" : "Male")) : "" },
                 { label: isRtl ? "الهاتف"                 : "Phone",         value: `${form.phoneCode} ${form.phone}`.trim() },
                 { label: isRtl ? "بريد السيرة الذاتية"    : "CV Email",      value: form.cvEmail },
                 { label: isRtl ? "الجنسية"                : "Nationality",   value: form.nationality },
