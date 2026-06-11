@@ -2,7 +2,13 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../supabase";
 import { useLang } from "../context/LanguageContext";
-import { Plus, Trash2, ChevronRight, ChevronLeft, ChevronDown, Loader2, Check, AlertCircle, Search, X, Sparkles } from "lucide-react";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+// @ts-ignore mammoth provides a browser build for DOCX text extraction
+import mammoth from "mammoth/mammoth.browser";
+import { Plus, Trash2, ChevronRight, ChevronLeft, ChevronDown, Loader2, Check, AlertCircle, Search, X, Sparkles, Upload } from "lucide-react";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 interface WorkEntry {
   id: string;
@@ -495,6 +501,170 @@ function buildSuggestions(rows: any[]): Record<string, string[]> {
   return Object.fromEntries(Object.entries(map).map(([k, v]) => [k, Array.from(v)]));
 }
 
+
+function getImportedPhoneParts(rawPhone: string) {
+  const cleaned = String(rawPhone || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return { phoneCode: "+961", phone: "", countryName: "Lebanon" };
+
+  const normalized = cleaned.startsWith("00") ? `+${cleaned.slice(2)}` : cleaned;
+  const match = [...COUNTRY_CODES]
+    .sort((a, b) => b.code.length - a.code.length)
+    .find(country => normalized.startsWith(country.code));
+
+  if (!match) return { phoneCode: "+961", phone: cleaned, countryName: "Lebanon" };
+
+  return {
+    phoneCode: match.code,
+    phone: normalized.slice(match.code.length).replace(/^[-\s]+/, "").trim(),
+    countryName: match.name,
+  };
+}
+
+function mapImportedLanguages(languages: any[] = []) {
+  const result = { langArabic: "", langEnglish: "", langFrench: "", langOther: "" };
+  const other: string[] = [];
+
+  languages.forEach(item => {
+    const name = String(item?.language || "").trim();
+    const level = String(item?.level || "").trim();
+    if (!name && !level) return;
+
+    const lower = name.toLowerCase();
+    if (lower.includes("arabic") || name.includes("عربي")) result.langArabic = level || "Fluent/Advanced";
+    else if (lower.includes("english") || name.includes("إنجليزي") || name.includes("انجليزي")) result.langEnglish = level || "Fluent/Advanced";
+    else if (lower.includes("french") || name.includes("فرنسي")) result.langFrench = level || "Proficient/Intermediate";
+    else other.push(level ? `${name}: ${level}` : name);
+  });
+
+  result.langOther = other.join(" | ");
+  return result;
+}
+
+function mapImportedCvToForm(prev: FormState, parsed: any): FormState {
+  const phoneParts = getImportedPhoneParts(parsed?.phone || "");
+  const languages = mapImportedLanguages(Array.isArray(parsed?.languages) ? parsed.languages : []);
+
+  const importedWork = Array.isArray(parsed?.work)
+    ? parsed.work
+        .map((w: any) => normalizeWorkEntry({
+          jobTitleKnown: "yes",
+          jobTitle: String(w?.jobTitle || "").trim(),
+          company: String(w?.company || "").trim(),
+          industry: "",
+          location: String(w?.location || "").trim(),
+          startMonth: String(w?.startMonth || "").padStart(2, "0").slice(-2).replace(/^00$/, ""),
+          startYear: String(w?.startYear || "").trim(),
+          endMonth: String(w?.endMonth || "").padStart(2, "0").slice(-2).replace(/^00$/, ""),
+          endYear: String(w?.endYear || "").trim(),
+          isCurrent: Boolean(w?.isCurrent),
+          responsibilities: String(w?.description || "").trim(),
+        }))
+        .filter((w: WorkEntry) => w.jobTitle || w.company || w.responsibilities)
+    : [];
+
+  const importedEducation = Array.isArray(parsed?.education)
+    ? parsed.education
+        .map((e: any) => ({
+          degree: String(e?.degree || "").trim(),
+          major: "",
+          university: String(e?.school || e?.university || "").trim(),
+          location: String(e?.location || "").trim(),
+          graduationYear: String(e?.endYear || e?.graduationYear || e?.year || "").trim(),
+          gpa: String(e?.gpa || "").trim(),
+        }))
+        .filter((e: EducationEntry) => e.degree || e.university || e.graduationYear)
+    : [];
+
+  const importedCertificates = Array.isArray(parsed?.certificates)
+    ? parsed.certificates
+        .map((c: any) => ({
+          name: String(c?.name || "").trim(),
+          institution: String(c?.issuer || c?.institution || "").trim(),
+          year: String(c?.year || "").trim(),
+        }))
+        .filter((c: CertEntry) => c.name || c.institution || c.year)
+    : [];
+
+  const importedProjects = Array.isArray(parsed?.projects)
+    ? parsed.projects
+        .map((project: any) => {
+          const description = String(project?.description || "").trim();
+          const technologies = String(project?.technologies || "").trim();
+          return {
+            title: String(project?.name || project?.title || "").trim(),
+            description: technologies ? `${description}${description ? "\n" : ""}Technologies: ${technologies}` : description,
+            year: String(project?.year || "").trim(),
+          };
+        })
+        .filter((p: ProjectEntry) => p.title || p.description || p.year)
+    : [];
+
+  const technicalSkills = Array.isArray(parsed?.technicalSkills)
+    ? parsed.technicalSkills.map((skill: unknown) => String(skill).trim()).filter(Boolean)
+    : [];
+
+  return {
+    ...prev,
+    fullName: String(parsed?.fullName || prev.fullName || "").trim(),
+    fullNameArabic: String(parsed?.fullNameArabic || prev.fullNameArabic || "").trim(),
+    gender: String(parsed?.gender || prev.gender || "").trim().toLowerCase(),
+    phoneCode: parsed?.phone ? phoneParts.phoneCode : prev.phoneCode,
+    phone: parsed?.phone ? phoneParts.phone : prev.phone,
+    cvEmail: String(parsed?.cvEmail || prev.cvEmail || "").trim(),
+    linkedin: String(parsed?.linkedin || prev.linkedin || "").trim(),
+    nationality: String(parsed?.nationality || prev.nationality || "").trim(),
+    location: String(parsed?.location || prev.location || "").trim(),
+    targetJob: String(parsed?.targetJob || prev.targetJob || "").trim(),
+    work: importedWork.length ? importedWork : prev.work,
+    education: importedEducation.length ? importedEducation : prev.education,
+    technicalSkills: technicalSkills.length ? Array.from(new Set([...prev.technicalSkills, ...technicalSkills])) : prev.technicalSkills,
+    langArabic: languages.langArabic || prev.langArabic,
+    langEnglish: languages.langEnglish || prev.langEnglish,
+    langFrench: languages.langFrench || prev.langFrench,
+    langOther: languages.langOther || prev.langOther,
+    certificates: importedCertificates.length ? importedCertificates : prev.certificates,
+    projects: importedProjects.length ? importedProjects : prev.projects,
+  };
+}
+
+async function extractTextFromCvFile(file: File): Promise<string> {
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+    const pages: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item: any) => String(item?.str || "").trim())
+        .filter(Boolean)
+        .join(" ");
+      if (text) pages.push(text);
+    }
+
+    return pages.join("\n\n").trim();
+  }
+
+  if (
+    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    file.name.toLowerCase().endsWith(".docx")
+  ) {
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    return String(result?.value || "").trim();
+  }
+
+  throw new Error("Unsupported file type");
+}
+
+function sanitizeStorageFileName(name: string) {
+  return name
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "uploaded-cv";
+}
+
 const TOTAL_STEPS = 6;
 
 const stepTitles = [
@@ -526,7 +696,11 @@ export default function ResumeForm() {
   const [aiErrors, setAiErrors]                   = useState<Record<string, string>>({});
   const [titleLoading, setTitleLoading]           = useState<Record<string, boolean>>({});
   const [titleErrors, setTitleErrors]             = useState<Record<string, string>>({});
+  const [cvImporting, setCvImporting]             = useState(false);
+  const [cvImportStatus, setCvImportStatus]       = useState<"idle" | "uploading" | "extracting" | "importing" | "done">("idle");
+  const [cvImportError, setCvImportError]         = useState("");
   const phoneDropdownRef = useRef<HTMLDivElement>(null);
+  const cvImportInputRef = useRef<HTMLInputElement>(null);
 
   // ── Save progress ──
   const [suggestions,  setSuggestions]  = useState<Record<string, string[]>>({});
@@ -913,6 +1087,93 @@ export default function ResumeForm() {
     }
   };
 
+  const handleCvImportFile = async (file?: File | null) => {
+    if (!file || cvImporting) return;
+
+    const allowedTypes = [
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+    const lowerName = file.name.toLowerCase();
+    const isAllowed = allowedTypes.includes(file.type) || lowerName.endsWith(".pdf") || lowerName.endsWith(".docx");
+
+    if (!isAllowed) {
+      setCvImportError(isRtl ? "ارفع ملف PDF أو DOCX فقط." : "Please upload a PDF or DOCX file only.");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setCvImportError(isRtl ? "حجم الملف يجب ألا يتجاوز 10 MB." : "File size must be 10 MB or less.");
+      return;
+    }
+
+    if (!userId) {
+      setCvImportError(isRtl ? "يجب تسجيل الدخول قبل رفع السيرة الذاتية." : "Please log in before uploading your CV.");
+      return;
+    }
+
+    const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+    const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+    const lsKey = Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token"));
+    const accessToken = lsKey
+      ? (JSON.parse(localStorage.getItem(lsKey) || "null")?.access_token ?? null)
+      : null;
+
+    setCvImporting(true);
+    setCvImportError("");
+    setCvImportStatus("uploading");
+
+    try {
+      const storagePath = `${userId}/${Date.now()}-${sanitizeStorageFileName(file.name)}`;
+      const { error: uploadError } = await supabase.storage
+        .from("cv_imports")
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          contentType: file.type || (lowerName.endsWith(".pdf") ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+          upsert: false,
+        });
+
+      if (uploadError) throw uploadError;
+
+      setCvImportStatus("extracting");
+      const extractedText = await extractTextFromCvFile(file);
+
+      if (!extractedText || extractedText.trim().length < 80) {
+        throw new Error(isRtl ? "لم نتمكن من قراءة نص كافٍ من الملف." : "We could not read enough text from this file.");
+      }
+
+      setCvImportStatus("importing");
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/parse-cv-import`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${accessToken ?? SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ extractedText, language: lang }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || (isRtl ? "فشل استيراد بيانات السيرة الذاتية." : "CV import failed."));
+      }
+
+      const parsedData = data?.parsedData || data;
+      setForm(prev => mapImportedCvToForm(prev, parsedData));
+      setPhoneCountryName(getImportedPhoneParts(parsedData?.phone || "").countryName);
+      setShowErrors(false);
+      setDraftRestored(false);
+      setCvImportStatus("done");
+    } catch (err: any) {
+      console.error("CV import error:", err);
+      setCvImportStatus("idle");
+      setCvImportError(err?.message || (isRtl ? "حدث خطأ أثناء استيراد السيرة الذاتية." : "Something went wrong while importing your CV."));
+    } finally {
+      setCvImporting(false);
+      if (cvImportInputRef.current) cvImportInputRef.current.value = "";
+    }
+  };
+
   // ── Submit (Direct Fetch — all cv_archive writes bypass SDK) ──
   const handleSubmit = async () => {
     if (!userId || !form.agreedToTerms) return;
@@ -1220,21 +1481,56 @@ export default function ResumeForm() {
                     {isRtl ? "استيراد البيانات" : "Import your profile"}
                   </p>
                   <p className="text-[12px] text-[#A8B4CC] leading-relaxed mt-1">
-                    {isRtl ? "قريباً يمكنك رفع سيرتك الحالية لملء هذا النموذج تلقائياً. حالياً أكمل البيانات يدوياً لضمان أفضل نتيجة." : "Soon you will be able to upload your existing CV to auto-fill this form. For now, complete the fields manually for best results."}
+                    {isRtl
+                      ? "ارفع سيرتك الحالية بصيغة PDF أو DOCX وسنملأ النموذج تلقائياً. راجع البيانات قبل المتابعة."
+                      : "Upload your existing CV as PDF or DOCX and we will auto-fill the form. Review everything before continuing."}
                   </p>
                 </div>
-                <span className="px-2 py-1 rounded-full bg-[rgba(224,197,143,0.12)] text-[#E0C58F] text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">
-                  {isRtl ? "قريباً" : "Soon"}
+                <span className="px-2 py-1 rounded-full bg-[rgba(18,178,193,0.12)] text-[#12B2C1] text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">
+                  {isRtl ? "جديد" : "New"}
                 </span>
               </div>
+
+              <input
+                ref={cvImportInputRef}
+                type="file"
+                accept="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx"
+                className="hidden"
+                onChange={e => handleCvImportFile(e.target.files?.[0])}
+              />
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button type="button" disabled className="px-3 py-2 rounded-lg border border-[rgba(86,108,158,0.28)] bg-[rgba(86,108,158,0.08)] text-[#7A8FAA] text-[12px] cursor-not-allowed">
-                  {isRtl ? "رفع CV PDF/DOCX" : "Upload CV PDF/DOCX"}
+                <button
+                  type="button"
+                  disabled={cvImporting}
+                  onClick={() => cvImportInputRef.current?.click()}
+                  className={`px-3 py-2 rounded-lg border text-[12px] font-semibold transition-all flex items-center justify-center gap-2 ${cvImporting ? "border-[rgba(86,108,158,0.28)] bg-[rgba(86,108,158,0.08)] text-[#7A8FAA] cursor-wait" : "border-[rgba(18,178,193,0.45)] bg-[rgba(18,178,193,0.09)] text-[#12B2C1] hover:bg-[rgba(18,178,193,0.14)]"}`}
+                >
+                  {cvImporting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  {cvImporting
+                    ? (cvImportStatus === "uploading"
+                        ? (isRtl ? "جاري الرفع..." : "Uploading...")
+                        : cvImportStatus === "extracting"
+                          ? (isRtl ? "جاري قراءة الملف..." : "Extracting text...")
+                          : (isRtl ? "جاري الاستيراد..." : "Importing..."))
+                    : (isRtl ? "رفع CV PDF/DOCX" : "Upload CV PDF/DOCX")}
                 </button>
                 <button type="button" disabled className="px-3 py-2 rounded-lg border border-[rgba(86,108,158,0.28)] bg-[rgba(86,108,158,0.08)] text-[#7A8FAA] text-[12px] cursor-not-allowed">
-                  {isRtl ? "استيراد LinkedIn" : "LinkedIn Import"}
+                  {isRtl ? "استيراد LinkedIn قريباً" : "LinkedIn Import Soon"}
                 </button>
               </div>
+
+              {cvImportStatus === "done" && !cvImportError && (
+                <p className="flex items-center gap-1.5 text-[12px] text-[#12B2C1] font-semibold">
+                  <Check size={13} /> {isRtl ? "تم ملء النموذج. راجع البيانات قبل المتابعة." : "Form filled. Review the imported data before continuing."}
+                </p>
+              )}
+
+              {cvImportError && (
+                <p className="flex items-center gap-1.5 text-[12px] text-red-400 font-medium">
+                  <AlertCircle size={13} /> {cvImportError}
+                </p>
+              )}
             </div>
             <div>
               <label className={labelCls}>{isRtl ? "الاسم الكامل *" : "Full Name *"}</label>
