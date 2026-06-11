@@ -307,6 +307,17 @@ function isEgyptLocation(value: string) {
   return EGYPT_LOCATION_PATTERNS.some(pattern => normalized.includes(pattern.toLowerCase()));
 }
 
+function getCookieValue(name: string) {
+  if (typeof document === "undefined") return "";
+
+  return (
+    document.cookie
+      .split("; ")
+      .find((row) => row.startsWith(`${name}=`))
+      ?.split("=")[1] || ""
+  );
+}
+
 function fallbackTitleSuggestions(description: string, language: string): string[] {
   const text = description.toLowerCase();
   const ar = language === "ar";
@@ -646,7 +657,11 @@ export default function ResumeForm() {
   }, [form, step, userId, isEditMode, draftLoaded]);
 
   // ── Validation ──
-  const needsArabicName = isEgyptLocation(form.location);
+  const userRegion = getCookieValue("user_region");
+
+  const needsArabicName =
+    userRegion === "EG" ||
+    isEgyptLocation(form.location);
 
   const isStepValid = () => {
     switch (step) {
