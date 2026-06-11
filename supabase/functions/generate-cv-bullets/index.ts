@@ -6,39 +6,67 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+function cleanLines(content: string, max = 8) {
+  return content
+    .split("\n")
+    .map((line) => line.replace(/^[-•*\d.)\s]+/, "").trim())
+    .filter(Boolean)
+    .slice(0, max);
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const { jobTitle, company, language } = await req.json();
+    const { jobTitle, roleDescription, industry, company, language } = await req.json();
 
-    if (!jobTitle?.trim()) {
-      return new Response(JSON.stringify({ error: "jobTitle is required" }), {
+    const title = String(jobTitle || "").trim();
+    const duties = String(roleDescription || "").trim();
+    const sector = String(industry || "").trim();
+    const companyName = String(company || "").trim();
+
+    if (!title && !duties) {
+      return new Response(JSON.stringify({ error: "jobTitle or roleDescription is required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const isArabic = language === "ar";
-    const companyText = company?.trim()
+    const companyText = companyName
       ? isArabic
-        ? ` في شركة "${company.trim()}"`
-        : ` at "${company.trim()}"`
+        ? `\nالشركة: ${companyName}`
+        : `\nCompany: ${companyName}`
+      : "";
+    const industryText = sector
+      ? isArabic
+        ? `\nقطاع الشركة / نوع النشاط: ${sector}`
+        : `\nCompany industry / business type: ${sector}`
       : "";
 
     const prompt = isArabic
       ? `
 أنت مساعد ذكي داخل منصة Resumation. هدفك ليس كتابة مهام جاهزة للمستخدم، بل طرح أسئلة دقيقة تساعده على تذكّر تفاصيل عمله حتى يتمكن محرك السيرة الذاتية لاحقاً من تحويل إجاباته إلى مسؤوليات وإنجازات احترافية.
 
-المستخدم يكتب خبرته لوظيفة: "${jobTitle.trim()}"${companyText}.
+اعتمد على المعلومات التالية بهذا الترتيب:
+1. المهام الفعلية التي كتبها المستخدم.
+2. قطاع الشركة / نوع النشاط.
+3. المسمى الوظيفي المقترح أو الرسمي.
+
+المسمى الوظيفي:
+${title || "غير محدد"}
+
+المهام الفعلية المكتوبة من المستخدم:
+${duties || "غير محددة"}${industryText}${companyText}
 
 المطلوب:
 - اكتب من 6 إلى 8 أسئلة قصيرة ومباشرة.
-- يجب أن تكون الأسئلة مخصصة جداً لهذا المسمى الوظيفي، وليست عامة.
-- اسأل عن الأرقام والنتائج إن كانت مناسبة: عدد العملاء، حجم المبيعات، نسبة التحسن، عدد الفريق، حجم الميزانية، عدد الطلبات، الأنظمة المستخدمة.
-- لا تكتب أي مسؤوليات جاهزة.
+- يجب أن تكون الأسئلة مبنية على المهام الفعلية والقطاع، وليس على المسمى فقط.
+- إذا كانت المهام متعددة، اسأل أسئلة تغطي الدور كوظيفة واحدة متكاملة وليس كل مهمة كوظيفة منفصلة.
+- اسأل عن أرقام ونتائج حقيقية إن أمكن: عدد العملاء، عدد الطلبات، عدد الملفات، عدد السير الذاتية، عدد المقابلات، نسبة التحسن، حجم الفريق، الأدوات والأنظمة، المنصات، الميزانية.
+- لا تكتب مسؤوليات جاهزة.
 - لا تكتب bullets للسيرة الذاتية.
 - لا تخترع أي إنجاز.
 - لا تسأل أسئلة طويلة أو معقدة.
@@ -48,23 +76,29 @@ serve(async (req: Request) => {
 - بدون مقدمات.
 - بدون شرح إضافي.
 
-أمثلة على نوعية الأسئلة المطلوبة حسب الوظيفة:
-إذا كانت الوظيفة مبيعات، اسأل عن target، نسبة تحقيق الهدف، عدد العملاء، الصفقات.
-إذا كانت خدمة عملاء، اسأل عن عدد العملاء يومياً، الشكاوى، القنوات، CRM.
-إذا كانت محاسبة، اسأل عن التقارير، الضرائب، البرامج المحاسبية، الإقفال الشهري.
-إذا كانت تسويق، اسأل عن المنصات، الميزانية، leads، ROAS.
-إذا كانت صيدلة، اسأل عن الوصفات، المرضى، المخزون، الأنظمة الصيدلية.
-إذا كانت برمجة، اسأل عن التقنيات، المشاريع، الأداء، قواعد البيانات.
+مثال مهم:
+إذا كتب المستخدم أنه كان يبحث عن وظائف للعملاء، يكتب CV وCover Letter، يدخل بيانات، ويتواصل مع العملاء، فلا تسأل أسئلة عامة عن "باحث عن عمل".
+اسأل عن عدد العملاء، عدد السير الذاتية، منصات البحث، التواصل مع الشركات، عدد الطلبات، المقابلات، ونوع ملفات العملاء.
 `
       : `
 You are an AI assistant inside Resumation. Your job is not to write CV bullets for the user. Your job is to ask smart, role-specific questions that help the user remember factual details about their work, so the CV engine can later turn those answers into professional responsibilities and achievements.
 
-The user is writing experience for this role: "${jobTitle.trim()}"${companyText}.
+Use the information in this priority order:
+1. The actual duties described by the user.
+2. The company industry / business type.
+3. The official or suggested job title.
+
+Job title:
+${title || "Not specified"}
+
+Actual duties described by the user:
+${duties || "Not specified"}${industryText}${companyText}
 
 Requirements:
 - Write 6 to 8 short, direct questions.
-- Questions must be highly specific to this job title, not generic.
-- Ask about numbers and outcomes when relevant: customers handled, sales targets, revenue growth, team size, budget, number of requests, tools, systems, platforms, processes improved.
+- Questions must be based on the actual duties and industry, not on the job title alone.
+- If the duties are mixed, ask questions that cover one unified role, not one separate role per duty.
+- Ask about real numbers and outcomes when relevant: customers handled, applications sent, CVs written, files processed, interviews generated, tools used, platforms, team size, budget, process improvements.
 - Do not write ready CV bullets.
 - Do not write responsibilities for the user.
 - Do not invent achievements.
@@ -75,13 +109,9 @@ Requirements:
 - No introduction.
 - No extra explanation.
 
-Examples of question direction:
-For sales roles, ask about targets, achievement percentage, clients, deals.
-For customer service, ask about daily customers, complaints, channels, CRM tools.
-For accounting, ask about reports, tax, accounting software, monthly closing.
-For marketing, ask about platforms, budgets, leads, ROAS.
-For pharmacy, ask about prescriptions, patients, inventory, pharmacy systems.
-For software roles, ask about technologies, projects, performance, databases.
+Important example:
+If the user says they searched jobs for clients, wrote CVs and cover letters, entered data, and communicated with customers, do not ask generic questions about a "job searcher".
+Ask about number of clients, number of CVs, job boards used, employer communication, applications submitted, interviews secured, and client files handled.
 `;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -92,8 +122,8 @@ For software roles, ask about technologies, projects, performance, databases.
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        max_tokens: 700,
-        temperature: 0.4,
+        max_tokens: 850,
+        temperature: 0.35,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -105,16 +135,7 @@ For software roles, ask about technologies, projects, performance, databases.
 
     const data = await response.json();
     const content: string = data.choices?.[0]?.message?.content ?? "";
-
-    const questions = content
-      .split("\n")
-      .map((line) =>
-        line
-          .replace(/^[-•*\d.)\s]+/, "")
-          .trim(),
-      )
-      .filter(Boolean)
-      .slice(0, 8);
+    const questions = cleanLines(content, 8);
 
     return new Response(
       JSON.stringify({

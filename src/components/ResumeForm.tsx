@@ -11,6 +11,7 @@ interface WorkEntry {
   roleDescription: string;
   titleSuggestions: string[];
   company: string;
+  industry: string;
   location: string;
   startDate: string;
   endDate: string;
@@ -73,6 +74,7 @@ const defaultWork: WorkEntry = {
   roleDescription: "",
   titleSuggestions: [],
   company: "",
+  industry: "",
   location: "",
   startDate: "",
   endDate: "",
@@ -295,6 +297,71 @@ const MONTH_OPTIONS = [
 
 const YEAR_OPTIONS = Array.from({ length: 70 }, (_, i) => String(new Date().getFullYear() + 1 - i));
 
+const INDUSTRY_OPTIONS = [
+  { value: "Accounting & Auditing", en: "Accounting & Auditing", ar: "المحاسبة والتدقيق" },
+  { value: "Administration & Office Support", en: "Administration & Office Support", ar: "الإدارة والدعم المكتبي" },
+  { value: "Advertising & Creative Agencies", en: "Advertising & Creative Agencies", ar: "الإعلان والوكالات الإبداعية" },
+  { value: "Agriculture & Farming", en: "Agriculture & Farming", ar: "الزراعة والإنتاج الزراعي" },
+  { value: "Airlines & Aviation", en: "Airlines & Aviation", ar: "الطيران والخطوط الجوية" },
+  { value: "Architecture & Interior Design", en: "Architecture & Interior Design", ar: "الهندسة المعمارية والتصميم الداخلي" },
+  { value: "Automotive", en: "Automotive", ar: "السيارات" },
+  { value: "Banking", en: "Banking", ar: "الخدمات المصرفية" },
+  { value: "Beauty, Wellness & Fitness", en: "Beauty, Wellness & Fitness", ar: "التجميل والعناية واللياقة" },
+  { value: "Business Consulting", en: "Business Consulting", ar: "الاستشارات الإدارية" },
+  { value: "Call Center & BPO", en: "Call Center & BPO", ar: "مراكز الاتصال وخدمات التعهيد" },
+  { value: "Career Services & Recruitment", en: "Career Services & Recruitment", ar: "الخدمات المهنية والتوظيف" },
+  { value: "Chemicals", en: "Chemicals", ar: "الصناعات الكيميائية" },
+  { value: "Construction & Contracting", en: "Construction & Contracting", ar: "البناء والمقاولات" },
+  { value: "Consumer Goods", en: "Consumer Goods", ar: "السلع الاستهلاكية" },
+  { value: "Customer Service", en: "Customer Service", ar: "خدمة العملاء" },
+  { value: "Design & Creative", en: "Design & Creative", ar: "التصميم والإبداع" },
+  { value: "E-Commerce", en: "E-Commerce", ar: "التجارة الإلكترونية" },
+  { value: "Education & Training", en: "Education & Training", ar: "التعليم والتدريب" },
+  { value: "Engineering", en: "Engineering", ar: "الهندسة" },
+  { value: "Entertainment & Events", en: "Entertainment & Events", ar: "الترفيه والفعاليات" },
+  { value: "Facilities Management", en: "Facilities Management", ar: "إدارة المرافق" },
+  { value: "Fashion & Apparel", en: "Fashion & Apparel", ar: "الأزياء والملابس" },
+  { value: "Finance & Investment", en: "Finance & Investment", ar: "المالية والاستثمار" },
+  { value: "FMCG", en: "FMCG", ar: "السلع الاستهلاكية سريعة التداول" },
+  { value: "Food & Beverage", en: "Food & Beverage", ar: "الأغذية والمشروبات" },
+  { value: "Government & Public Sector", en: "Government & Public Sector", ar: "الحكومة والقطاع العام" },
+  { value: "Healthcare & Hospitals", en: "Healthcare & Hospitals", ar: "الرعاية الصحية والمستشفيات" },
+  { value: "Hospitality & Hotels", en: "Hospitality & Hotels", ar: "الضيافة والفنادق" },
+  { value: "Human Resources", en: "Human Resources", ar: "الموارد البشرية" },
+  { value: "Import & Export", en: "Import & Export", ar: "الاستيراد والتصدير" },
+  { value: "Industrial Manufacturing", en: "Industrial Manufacturing", ar: "التصنيع الصناعي" },
+  { value: "Information Technology", en: "Information Technology", ar: "تكنولوجيا المعلومات" },
+  { value: "Insurance", en: "Insurance", ar: "التأمين" },
+  { value: "Legal Services", en: "Legal Services", ar: "الخدمات القانونية" },
+  { value: "Logistics & Supply Chain", en: "Logistics & Supply Chain", ar: "اللوجستيات وسلاسل الإمداد" },
+  { value: "Marketing & Digital Media", en: "Marketing & Digital Media", ar: "التسويق والإعلام الرقمي" },
+  { value: "Media & Broadcasting", en: "Media & Broadcasting", ar: "الإعلام والبث" },
+  { value: "Medical Devices", en: "Medical Devices", ar: "الأجهزة الطبية" },
+  { value: "NGO & Non-Profit", en: "NGO & Non-Profit", ar: "المنظمات غير الربحية" },
+  { value: "Oil, Gas & Energy", en: "Oil, Gas & Energy", ar: "النفط والغاز والطاقة" },
+  { value: "Operations Management", en: "Operations Management", ar: "إدارة العمليات" },
+  { value: "Pharmaceuticals", en: "Pharmaceuticals", ar: "الصناعات الدوائية" },
+  { value: "Printing & Publishing", en: "Printing & Publishing", ar: "الطباعة والنشر" },
+  { value: "Procurement & Purchasing", en: "Procurement & Purchasing", ar: "المشتريات والتوريد" },
+  { value: "Product Management", en: "Product Management", ar: "إدارة المنتجات" },
+  { value: "Project Management", en: "Project Management", ar: "إدارة المشاريع" },
+  { value: "Quality Assurance & Control", en: "Quality Assurance & Control", ar: "ضمان الجودة ومراقبة الجودة" },
+  { value: "Real Estate", en: "Real Estate", ar: "العقارات" },
+  { value: "Research & Development", en: "Research & Development", ar: "البحث والتطوير" },
+  { value: "Restaurants & Catering", en: "Restaurants & Catering", ar: "المطاعم وخدمات الطعام" },
+  { value: "Retail", en: "Retail", ar: "التجزئة" },
+  { value: "Sales & Business Development", en: "Sales & Business Development", ar: "المبيعات وتطوير الأعمال" },
+  { value: "Security Services", en: "Security Services", ar: "خدمات الأمن" },
+  { value: "Software & SaaS", en: "Software & SaaS", ar: "البرمجيات ومنصات SaaS" },
+  { value: "Telecommunications", en: "Telecommunications", ar: "الاتصالات" },
+  { value: "Tourism & Travel", en: "Tourism & Travel", ar: "السياحة والسفر" },
+  { value: "Transportation", en: "Transportation", ar: "النقل والمواصلات" },
+  { value: "Warehouse & Distribution", en: "Warehouse & Distribution", ar: "المستودعات والتوزيع" },
+  { value: "Writing, Translation & Content", en: "Writing, Translation & Content", ar: "الكتابة والترجمة والمحتوى" },
+  { value: "Other", en: "Other", ar: "أخرى" },
+];
+
+
 const EGYPT_LOCATION_PATTERNS = [
   "egypt", "مصر", "cairo", "القاهرة", "alexandria", "الإسكندرية", "giza", "الجيزة",
   "mansoura", "المنصورة", "dakahlia", "الدقهلية", "tanta", "طنطا", "aswan", "أسوان",
@@ -378,6 +445,7 @@ function normalizeWorkEntry(raw: Partial<WorkEntry> = {}): WorkEntry {
     jobTitleKnown: raw.jobTitleKnown || (raw.roleDescription ? "no" : "yes"),
     roleDescription: raw.roleDescription || "",
     titleSuggestions: Array.isArray(raw.titleSuggestions) ? raw.titleSuggestions : [],
+    industry: raw.industry || "",
     startMonth: raw.startMonth || start.month,
     startYear: raw.startYear || start.year,
     endMonth: raw.endMonth || (isCurrent ? "" : end.month),
@@ -407,6 +475,7 @@ function buildSuggestions(rows: any[]): Record<string, string[]> {
     (cv.workExperience ?? []).forEach((w: any) => {
       add("jobTitle",      w.jobTitle);
       add("company",       w.company);
+      add("industry",      w.industry);
       add("workLocation",  w.location);
     });
     (cv.education ?? []).forEach((e: any) => {
@@ -682,6 +751,7 @@ export default function ResumeForm() {
 
           return hasProfessionalTitle
             && w.company.trim() !== ""
+            && w.industry.trim() !== ""
             && w.startMonth.trim() !== ""
             && w.startYear.trim() !== ""
             && (w.isCurrent || (w.endMonth.trim() !== "" && w.endYear.trim() !== ""))
@@ -716,7 +786,7 @@ export default function ResumeForm() {
   const setProj = (i: number, field: keyof ProjectEntry, value: string) =>
     setForm(prev => { const projects = [...prev.projects]; projects[i] = { ...projects[i], [field]: value }; return { ...prev, projects }; });
 
-  const generateTitleSuggestions = async (workId: string, roleDescription: string, company: string) => {
+  const generateTitleSuggestions = async (workId: string, roleDescription: string, company: string, industry: string) => {
     if (!roleDescription.trim()) return;
 
     const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -741,7 +811,7 @@ export default function ResumeForm() {
           "Authorization": `Bearer ${accessToken ?? SUPABASE_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ roleDescription, company, language: lang }),
+        body: JSON.stringify({ roleDescription, company, industry, language: lang }),
       });
 
       let titles: string[] = [];
@@ -778,7 +848,7 @@ export default function ResumeForm() {
   };
 
   // ── AI Questions Engine ──
-  const generateQuestions = async (workId: string, jobTitle: string, company: string) => {
+  const generateQuestions = async (workId: string, jobTitle: string, company: string, roleDescription: string, industry: string) => {
     if (!jobTitle.trim()) return;
 
     const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -811,7 +881,7 @@ export default function ResumeForm() {
           "Authorization": `Bearer ${accessToken ?? SUPABASE_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ jobTitle, company, language: lang }),
+        body: JSON.stringify({ jobTitle, company, roleDescription, industry, language: lang }),
         signal: controller.signal,
       });
 
@@ -1005,6 +1075,7 @@ export default function ResumeForm() {
               .map(w => ({
                 title:       w.jobTitle,
                 company:     w.company,
+                industry:    w.industry,
                 duration:    `${w.startDate}${w.endDate ? " - " + w.endDate : ""}`.trim(),
                 description: w.responsibilities,
               })),
@@ -1380,7 +1451,7 @@ export default function ResumeForm() {
                       <button
                         type="button"
                         disabled={!w.roleDescription.trim() || Boolean(titleLoading[w.id])}
-                        onClick={() => generateTitleSuggestions(w.id, w.roleDescription, w.company)}
+                        onClick={() => generateTitleSuggestions(w.id, w.roleDescription, w.company, w.industry)}
                         className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-[rgba(18,178,193,0.08)] border border-[rgba(18,178,193,0.3)] text-[rgba(18,178,193,0.95)] hover:bg-[rgba(18,178,193,0.16)] transition-all disabled:opacity-45 disabled:cursor-not-allowed text-[12px] font-semibold"
                       >
                         {titleLoading[w.id]
@@ -1431,6 +1502,29 @@ export default function ResumeForm() {
                   <input className={inp(w.company, true)} value={w.company} onChange={e => setWork(i, "company", e.target.value)} placeholder={isRtl ? "مثال: جوجل" : "e.g. Google"} onFocus={() => setActiveField(`company_${i}`)} onBlur={() => setActiveField(null)} />
                   <SuggestBox fieldKey="company" onSelect={v => { setWork(i, "company", v); setActiveField(null); }} />
                   {errMsg(w.company, isRtl ? "اسم الشركة مطلوب" : "Company name is required")}
+                </div>
+
+                <div>
+                  <label className={labelCls}>{isRtl ? "قطاع الشركة / نوع النشاط *" : "Company Industry / Business Type *"}</label>
+                  <select
+                    className={selectInp(w.industry, true)}
+                    value={w.industry}
+                    onChange={e => setWork(i, "industry", e.target.value)}
+                    dir={isRtl ? "rtl" : "ltr"}
+                  >
+                    <option className="bg-[#172033] text-[#F5F0E9]" value="">
+                      {isRtl ? "اختر القطاع" : "Select industry"}
+                    </option>
+                    {INDUSTRY_OPTIONS.map(ind => (
+                      <option className="bg-[#172033] text-[#F5F0E9]" key={ind.value} value={ind.value}>
+                        {isRtl ? `${ind.ar} — ${ind.en}` : `${ind.en} — ${ind.ar}`}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-[#7A8FAA] mt-1">
+                    {isRtl ? "يساعد الذكاء الاصطناعي على اقتراح مسمى وظيفي وأسئلة أدق حسب مجال الشركة." : "This helps AI suggest better job titles and questions based on the company context."}
+                  </p>
+                  {errMsg(w.industry, isRtl ? "قطاع الشركة مطلوب" : "Company industry is required")}
                 </div>
 
                 <div>
@@ -1504,8 +1598,8 @@ export default function ResumeForm() {
                     </label>
                     <button
                       type="button"
-                      disabled={!w.jobTitle.trim() || Boolean(aiLoading[w.id])}
-                      onClick={() => generateQuestions(w.id, w.jobTitle, w.company)}
+                      disabled={!w.jobTitle.trim() || !w.industry.trim() || Boolean(aiLoading[w.id])}
+                      onClick={() => generateQuestions(w.id, w.jobTitle, w.company, w.roleDescription, w.industry)}
                       className="flex items-center gap-1 px-2.5 py-1 text-[11px] bg-[rgba(18,178,193,0.08)] border border-[rgba(18,178,193,0.3)] rounded-lg text-[rgba(18,178,193,0.9)] hover:bg-[rgba(18,178,193,0.18)] transition-all disabled:opacity-40 disabled:cursor-not-allowed font-semibold tracking-wide whitespace-nowrap"
                     >
                       {aiLoading[w.id]
