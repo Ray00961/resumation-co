@@ -1125,11 +1125,16 @@ export default function ResumeForm() {
 
     try {
       const storagePath = `${userId}/${Date.now()}-${sanitizeStorageFileName(file.name)}`;
+      const uploadContentType = lowerName.endsWith(".pdf")
+        ? "application/pdf"
+        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const fileBuffer = await file.arrayBuffer();
+
       const { error: uploadError } = await supabase.storage
         .from("cv_imports")
-        .upload(storagePath, file, {
+        .upload(storagePath, fileBuffer, {
           cacheControl: "3600",
-          contentType: file.type || (lowerName.endsWith(".pdf") ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+          contentType: uploadContentType,
           upsert: false,
         });
 
