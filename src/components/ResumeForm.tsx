@@ -617,8 +617,30 @@ export default function ResumeForm() {
     setForm(prev => { const projects = [...prev.projects]; projects[i] = { ...projects[i], [field]: value }; return { ...prev, projects }; });
 
   // ── AI Questions Engine ──
+  const fallbackQuestions = (jobTitle: string) => {
+    if (isRtl) {
+      return [
+        `ما أهم المهام اليومية التي كنت تقوم بها في وظيفة ${jobTitle}?`,
+        "هل كنت تتعامل مع عملاء، مرضى، موردين، أو فريق عمل؟ كم تقريباً؟",
+        "ما الأدوات أو الأنظمة أو البرامج التي كنت تستخدمها؟",
+        "هل كان لديك هدف شهري أو مؤشرات أداء؟ اكتب الأرقام إن وجدت.",
+        "هل ساعدت في تحسين نتيجة معينة مثل الوقت، الجودة، المبيعات، أو رضا العملاء؟",
+        "هل كنت تعمل ضمن فريق أو تدير أشخاصاً؟ كم كان عددهم؟",
+      ].join("\n");
+    }
+
+    return [
+      `What were your main daily responsibilities as a ${jobTitle}?`,
+      "Did you work with customers, patients, suppliers, or internal teams? Approximately how many?",
+      "Which tools, systems, software, or platforms did you use?",
+      "Did you have monthly targets or performance indicators? Add numbers if available.",
+      "Did you improve anything such as time, quality, sales, service, or customer satisfaction?",
+      "Did you work within a team or manage people? How many?",
+    ].join("\n");
+  };
+
   const generateQuestions = async (workId: string, jobTitle: string, company: string) => {
-    if (!jobTitle.trim()) return;
+    if (!workId || !jobTitle.trim()) return;
 
     const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
     const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -640,10 +662,9 @@ export default function ResumeForm() {
     setAiLoading(prev => ({ ...prev, [workId]: true }));
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 25000);
 
     try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-cv-bullets`, {
+      const request = fetch(`${SUPABASE_URL}/functions/v1/generate-cv-bullets`, {
         method: "POST",
         headers: {
           "apikey": SUPABASE_KEY,
@@ -653,6 +674,15 @@ export default function ResumeForm() {
         body: JSON.stringify({ jobTitle, company, language: lang }),
         signal: controller.signal,
       });
+
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => {
+          controller.abort();
+          reject(new Error("AI request timed out"));
+        }, 22000);
+      });
+
+      const res = await Promise.race([request, timeout]);
 
       if (!res.ok) {
         const text = await res.text();
@@ -668,12 +698,14 @@ export default function ResumeForm() {
 
       setAiTips(prev => ({ ...prev, [workId]: content }));
     } catch (err: any) {
-      const message = err?.name === "AbortError"
-        ? (isRtl ? "استغرق إنشاء الأسئلة وقتاً طويلاً. حاول مرة أخرى." : "Creating questions took too long. Please try again.")
-        : (isRtl ? "لم نتمكن من إنشاء الأسئلة. حاول مرة أخرى." : "We could not create questions. Please try again.");
+      console.error("AI questions error:", err);
+      const message = err?.message === "AI request timed out" || err?.name === "AbortError"
+        ? (isRtl ? "استغرق إنشاء الأسئلة وقتاً طويلاً. عرضنا لك أسئلة مساعدة مؤقتة." : "Creating questions took too long. We added helpful fallback questions.")
+        : (isRtl ? "تعذر إنشاء الأسئلة حالياً. عرضنا لك أسئلة مساعدة مؤقتة." : "Could not create AI questions right now. We added helpful fallback questions.");
+
       setAiErrors(prev => ({ ...prev, [workId]: message }));
+      setAiTips(prev => ({ ...prev, [workId]: fallbackQuestions(jobTitle.trim()) }));
     } finally {
-      window.clearTimeout(timeoutId);
       setAiLoading(prev => {
         const next = { ...prev };
         delete next[workId];
@@ -853,9 +885,9 @@ export default function ResumeForm() {
   // ── Styles ──
   const base      = "w-full rounded-lg px-4 py-2.5 text-[#F5F0E9] text-sm focus:outline-none transition-colors";
   const inputCls  = `${base} bg-[rgba(86,108,158,0.14)] border border-[rgba(86,108,158,0.4)] placeholder-[#7A8FAA] focus:border-[rgba(18,178,193,0.65)] focus:bg-[rgba(86,108,158,0.18)]`;
-  const selectCls = `${base} bg-[#172033] border border-[rgba(86,108,158,0.55)] text-[#F5F0E9] focus:border-[rgba(18,178,193,0.75)] focus:bg-[#1B2638]`;
+  const selectCls = `${base} appearance-none cursor-pointer bg-[#172033] border border-[rgba(86,108,158,0.55)] text-[#F5F0E9] focus:border-[rgba(18,178,193,0.75)] focus:bg-[#1B2638]`;
   const errCls    = `${base} bg-[rgba(200,60,60,0.08)] border border-[rgba(220,80,80,0.55)] placeholder-[rgba(220,80,80,0.45)] focus:border-[rgba(220,80,80,0.75)]`;
-  const selectErrCls = `${base} bg-[rgba(200,60,60,0.08)] border border-[rgba(220,80,80,0.55)] text-[#F5F0E9] focus:border-[rgba(220,80,80,0.75)]`;
+  const selectErrCls = `${base} appearance-none cursor-pointer bg-[#2A1820] border border-[rgba(220,80,80,0.55)] text-[#F5F0E9] focus:border-[rgba(220,80,80,0.75)]`;
   const inp       = (value: string, required = false) => showErrors && required && value.trim() === "" ? errCls : inputCls;
   const selectInp = (value: string, required = false) => showErrors && required && value.trim() === "" ? selectErrCls : selectCls;
   const labelCls  = "block text-[12px] font-semibold text-[#E0C58F] mb-1.5 uppercase tracking-wider";
@@ -1119,17 +1151,17 @@ export default function ResumeForm() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>{isRtl ? "شهر البداية *" : "Start Month *"}</label>
-                    <select className={selectInp(w.startMonth, true)} value={w.startMonth} onChange={e => setWork(i, "startMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
-                      <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
-                      {MONTH_OPTIONS.map(m => <option className="bg-[#172033] text-[#F5F0E9]" key={m.value} value={m.value}>{`${m.value} - ${isRtl ? m.ar : m.en}`}</option>)}
+                    <select className={`${selectInp(w.startMonth, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={w.startMonth} onChange={e => setWork(i, "startMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
+                      <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
+                      {MONTH_OPTIONS.map(m => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={m.value} value={m.value}>{`${m.value} - ${isRtl ? m.ar : m.en}`}</option>)}
                     </select>
                     {errMsg(w.startMonth, isRtl ? "شهر البداية مطلوب" : "Start month is required")}
                   </div>
                   <div>
                     <label className={labelCls}>{isRtl ? "سنة البداية *" : "Start Year *"}</label>
-                    <select className={selectInp(w.startYear, true)} value={w.startYear} onChange={e => setWork(i, "startYear", e.target.value)} dir="ltr">
-                      <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر السنة" : "Select year"}</option>
-                      {YEAR_OPTIONS.map(y => <option className="bg-[#172033] text-[#F5F0E9]" key={y} value={y}>{y}</option>)}
+                    <select className={`${selectInp(w.startYear, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={w.startYear} onChange={e => setWork(i, "startYear", e.target.value)} dir="ltr">
+                      <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                      {YEAR_OPTIONS.map(y => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={y} value={y}>{y}</option>)}
                     </select>
                     {errMsg(w.startYear, isRtl ? "سنة البداية مطلوبة" : "Start year is required")}
                   </div>
@@ -1157,17 +1189,17 @@ export default function ResumeForm() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className={labelCls}>{isRtl ? "شهر النهاية *" : "End Month *"}</label>
-                      <select className={selectInp(w.endMonth, true)} value={w.endMonth} onChange={e => setWork(i, "endMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
-                        <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
-                        {MONTH_OPTIONS.map(m => <option className="bg-[#172033] text-[#F5F0E9]" key={m.value} value={m.value}>{`${m.value} - ${isRtl ? m.ar : m.en}`}</option>)}
+                      <select className={`${selectInp(w.endMonth, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={w.endMonth} onChange={e => setWork(i, "endMonth", e.target.value)} dir={isRtl ? "rtl" : "ltr"}>
+                        <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر الشهر" : "Select month"}</option>
+                        {MONTH_OPTIONS.map(m => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={m.value} value={m.value}>{`${m.value} - ${isRtl ? m.ar : m.en}`}</option>)}
                       </select>
                       {errMsg(w.endMonth, isRtl ? "شهر النهاية مطلوب" : "End month is required")}
                     </div>
                     <div>
                       <label className={labelCls}>{isRtl ? "سنة النهاية *" : "End Year *"}</label>
-                      <select className={selectInp(w.endYear, true)} value={w.endYear} onChange={e => setWork(i, "endYear", e.target.value)} dir="ltr">
-                        <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر السنة" : "Select year"}</option>
-                        {YEAR_OPTIONS.map(y => <option className="bg-[#172033] text-[#F5F0E9]" key={y} value={y}>{y}</option>)}
+                      <select className={`${selectInp(w.endYear, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={w.endYear} onChange={e => setWork(i, "endYear", e.target.value)} dir="ltr">
+                        <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                        {YEAR_OPTIONS.map(y => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={y} value={y}>{y}</option>)}
                       </select>
                       {errMsg(w.endYear, isRtl ? "سنة النهاية مطلوبة" : "End year is required")}
                     </div>
@@ -1300,9 +1332,9 @@ export default function ResumeForm() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>{isRtl ? "سنة التخرج *" : "Graduation Year *"}</label>
-                    <select className={selectInp(e.graduationYear, true)} value={e.graduationYear} onChange={ev => setEdu(i, "graduationYear", ev.target.value)} dir="ltr">
-                      <option className="bg-[#172033] text-[#F5F0E9]" value="">{isRtl ? "اختر السنة" : "Select year"}</option>
-                      {YEAR_OPTIONS.map(y => <option className="bg-[#172033] text-[#F5F0E9]" key={y} value={y}>{y}</option>)}
+                    <select className={`${selectInp(e.graduationYear, true)} [color-scheme:dark]`} style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }} value={e.graduationYear} onChange={ev => setEdu(i, "graduationYear", ev.target.value)} dir="ltr">
+                      <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} value="">{isRtl ? "اختر السنة" : "Select year"}</option>
+                      {YEAR_OPTIONS.map(y => <option style={{ backgroundColor: "#172033", color: "#F5F0E9" }} key={y} value={y}>{y}</option>)}
                     </select>
                     {errMsg(e.graduationYear, isRtl ? "سنة التخرج مطلوبة" : "Graduation year is required")}
                   </div>
@@ -1447,12 +1479,13 @@ export default function ResumeForm() {
                 <div key={key} className="mb-3">
                   <label className={labelCls}>{label}</label>
                   <select
-                    className={`${inputCls} cursor-pointer bg-[#111827] text-[#F5F0E9]`}
+                    className={`${inputCls} cursor-pointer bg-[#111827] text-[#F5F0E9] [color-scheme:dark]`}
+                    style={{ backgroundColor: "#172033", color: "#F5F0E9", colorScheme: "dark" }}
                     value={form[key as keyof FormState] as string}
                     onChange={e => set(key as keyof FormState, e.target.value)}
                   >
                     {langOptions.map(o => (
-                      <option key={o.value} value={o.value} className="bg-[#0D1117]">{o.label}</option>
+                      <option key={o.value} value={o.value} style={{ backgroundColor: "#172033", color: "#F5F0E9" }}>{o.label}</option>
                     ))}
                   </select>
                 </div>
