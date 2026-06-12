@@ -566,10 +566,15 @@ function mapImportedCvToForm(prev: FormState, parsed: any): FormState {
     ? parsed.education
         .map((e: any) => ({
           degree: String(e?.degree || "").trim(),
-          major: "",
+          major: String(e?.major || "").trim(),
           university: String(e?.school || e?.university || "").trim(),
           location: String(e?.location || "").trim(),
-          graduationYear: String(e?.endYear || e?.graduationYear || e?.year || "").trim(),
+          graduationYear: String(
+            e?.graduationYear ||
+            e?.endYear ||
+            e?.year ||
+            ""
+          ).trim(),
           gpa: String(e?.gpa || "").trim(),
         }))
         .filter((e: EducationEntry) => e.degree || e.university || e.graduationYear)
