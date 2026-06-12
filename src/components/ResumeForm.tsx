@@ -1130,15 +1130,25 @@ export default function ResumeForm() {
         : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       const fileBuffer = await file.arrayBuffer();
 
-      const { error: uploadError } = await supabase.storage
-        .from("cv_imports")
-        .upload(storagePath, fileBuffer, {
-          cacheControl: "3600",
-          contentType: uploadContentType,
-          upsert: false,
-        });
+      const uploadRes = await fetch(
+        `${SUPABASE_URL}/storage/v1/object/cv_imports/${encodeURIComponent(storagePath).replace(/%2F/g, "/")}`,
+        {
+          method: "POST",
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": `Bearer ${accessToken ?? SUPABASE_KEY}`,
+            "Content-Type": uploadContentType,
+            "Cache-Control": "3600",
+            "x-upsert": "false",
+          },
+          body: fileBuffer,
+        }
+      );
 
-      if (uploadError) throw uploadError;
+      if (!uploadRes.ok) {
+        const uploadText = await uploadRes.text().catch(() => "");
+        throw new Error(uploadText || `CV upload failed: ${uploadRes.status}`);
+      }
 
       setCvImportStatus("extracting");
       const extractedText = await extractTextFromCvFile(file);
