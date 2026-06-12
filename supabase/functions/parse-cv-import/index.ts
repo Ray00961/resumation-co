@@ -47,8 +47,8 @@ serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        temperature: 0.1,
-        max_tokens: 3500,
+        temperature: 0.05,
+        max_tokens: 4500,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -145,6 +145,69 @@ STRICT RULES:
 - Keep output keys exactly as defined below.
 - Output language preference: ${language}
 
+IMPORTANT DATE RULES:
+- If a date range is written as "2022 - 2025", use startYear "2022" and endYear "2025".
+- If a date range is written as "2025 - Present", use startYear "2025", endYear "", and isCurrent true.
+- If education has one year only, put that year in graduationYear AND endYear.
+- If month is not clearly present, keep month empty.
+- Never invent months.
+
+EDUCATION EXTRACTION RULES:
+- Separate degree and major whenever possible.
+- If education is written as "DEST in BUSINESS COMPUTER":
+  degree = "DEST"
+  major = "BUSINESS COMPUTER"
+- If education is written as "Bachelor of Science in Computer Science":
+  degree = "Bachelor of Science"
+  major = "Computer Science"
+- If education is written as "License in Business Administration":
+  degree = "License"
+  major = "Business Administration"
+- Do NOT put country or location into school unless it is clearly the institution name.
+- If the line after education is only a country/city plus year, put that value into location and the year into graduationYear/endYear.
+- If the school or university name is not clearly present, return school as an empty string.
+
+TECHNICAL SKILLS EXTRACTION RULES:
+- Extract technical skills from sections named or similar to:
+  Core Competencies, Technical Expertise, Technical Proficiencies, Software, Applications, Specialized Tools, Tools, Technologies, Programming, Systems, Platforms, IT Skills, Computer Skills.
+- Include software, platforms, systems, programming languages, databases, cloud tools, IT tools, business tools, healthcare systems, ERP/CRM systems, and security tools.
+- Examples of valid technical skills:
+  MS Office, Microsoft Power BI, ERP, HIS, EMR, LIS, VMware, NAC, IPS, Firewalls, AlinIQ, HTML, CSS, JavaScript, SQL, Power Platform, SAP, Oracle, Salesforce, AutoCAD.
+- Do NOT return empty technicalSkills if the CV has a technical skills/tools/proficiencies section.
+- Do NOT include soft skills such as leadership, communication, coaching, facilitation, teamwork, problem solving, or project management unless they are clearly listed as technical tools/platforms.
+- Preserve common tool names in their standard spelling when obvious:
+  MS OFFICE -> Microsoft Office
+  MS POWER BI -> Microsoft Power BI
+  JAVASCRIPT -> JavaScript
+
+LANGUAGE EXTRACTION RULES:
+- Extract languages from the Languages section only, unless languages are clearly listed elsewhere.
+- Normalize language names to English when obvious: Arabic, English, French.
+- Normalize levels to one of these exact values when possible:
+  Native/Bilingual
+  Fluent/Advanced
+  Proficient/Intermediate
+  Conversational/Basic
+- Mapping examples:
+  Native, Mother Tongue, Native Speaker -> Native/Bilingual
+  Fluent, Advanced, Excellent -> Fluent/Advanced
+  Intermediate, Proficient, Good -> Proficient/Intermediate
+  Basic, Conversational, Beginner -> Conversational/Basic
+
+CERTIFICATE EXTRACTION RULES:
+- Extract certifications/courses from sections named Certifications, Certificates, Courses, Professional Certifications.
+- If a certificate includes abbreviation in parentheses, keep the abbreviation in the name.
+- Extract issuer only if explicitly present.
+- Extract year only if explicitly present.
+
+TARGET JOB RULES:
+- Only extract targetJob if the CV clearly states a target role/objective/job title being applied for.
+- Do NOT guess targetJob from current job title.
+
+PROJECT RULES:
+- Only extract projects if there is a clear Projects section or clearly named projects.
+- Do NOT create empty project objects.
+
 Return this exact JSON shape:
 
 {
@@ -173,12 +236,14 @@ Return this exact JSON shape:
   "education": [
     {
       "degree": "",
+      "major": "",
       "school": "",
       "location": "",
       "startMonth": "",
       "startYear": "",
       "endMonth": "",
       "endYear": "",
+      "graduationYear": "",
       "gpa": "",
       "description": ""
     }
@@ -207,6 +272,13 @@ Return this exact JSON shape:
     }
   ]
 }
+
+FINAL CHECK BEFORE RETURNING JSON:
+- education.degree must not contain " in " + major if it can be separated.
+- education.graduationYear must be filled when an education year is visible.
+- technicalSkills must include tools/technologies listed in technical/proficiency sections.
+- languages.level must use the exact normalized dropdown values when possible.
+- Do not include empty project objects.
 
 CV TEXT:
 """
