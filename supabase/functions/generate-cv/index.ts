@@ -1271,6 +1271,12 @@ async function generateCvJson(cvData: any, plan: string, lang: string): Promise<
   }
 
   const data = await res.json();
+
+  console.log(
+    "[generate-cv] CV JSON usage:",
+    JSON.stringify(data.usage || null)
+  );
+
   const raw = data.choices?.[0]?.message?.content ?? "";
 
   const parsed = extractJsonObject(raw);
@@ -1303,6 +1309,12 @@ async function generateCoverLetterHtml(cvData: any, plan: string, lang: string):
 
   if (!res.ok) throw new Error(`OpenAI cover letter ${res.status}: ${await res.text()}`);
   const data = await res.json();
+
+  console.log(
+    "[generate-cv] Cover Letter usage:",
+    JSON.stringify(data.usage || null)
+  );
+
   return extractDiv(data.choices?.[0]?.message?.content ?? "");
 }
 
