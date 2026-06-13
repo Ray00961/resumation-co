@@ -456,9 +456,12 @@ const LoginPage = () => {
     const { error: pErr } = await supabase.from("profiles").upsert(
       {
         id: userId,
+        user_id: userId,
+        username: username.trim(),
         first_name: firstName.trim(),
         last_name: lastName.trim(),
-        username: username.trim(),
+        profile_email: liveSession.user.email ?? null,
+        updated_at: new Date().toISOString(),
       },
       { onConflict: "id" },
     );
