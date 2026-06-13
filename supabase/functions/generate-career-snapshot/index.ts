@@ -169,6 +169,14 @@ function buildProfilePayload(params: {
   const fullName = safeString(cvData.fullName);
   const splitName = splitFullName(fullName);
 
+  const username =
+    safeString(archive.username) ||
+    safeString(userRow?.username);
+
+  if (!username) {
+    throw new Error("Missing username for profiles upsert");
+  }
+
   const firstName =
     safeString(archive.cv_first_name) ||
     safeString(archive.first_name) ||
@@ -202,38 +210,57 @@ function buildProfilePayload(params: {
     safeString(archive.email) ||
     safeString(userRow?.email);
 
+  const profileEmail =
+    safeString(userRow?.email) ||
+    cvEmail;
+
   const skills = normalizeTextArray(cvData.technicalSkills, 80);
   const education = normalizeProfileEducation(cvData.education);
   const experience = normalizeProfileExperience(cvData.workExperience);
+  const otherLinks = normalizeOtherLinks(cvData);
 
   return {
+    // IDENTITY — must stay immutable after insert
     id: userId,
-
-    first_name: firstName,
-    last_name: lastName,
-    username: safeString(archive.username) || safeString(userRow?.username) || null,
-
-    headline: targetJob || null,
-    location: location || null,
-    website: safeString(cvData.linkedin) || null,
-    phone: phone || null,
-
-    about: professionalSummary || null,
-    ai_summary: professionalSummary || null,
-
-    target_jobs: targetJob ? [targetJob] : [],
-    skills,
-    experience,
-    education,
-
-    full_name_ar: safeString(cvData.fullNameArabic) || safeString(archive.cv_full_name_ar) || null,
-    gender: safeString(cvData.gender) || safeString(archive.gender) || null,
-
-    nationality: safeString(cvData.nationality) || null,
-    cv_email: cvEmail || null,
-    target_job: targetJob || null,
-
+    user_id: userId,
+    username,
     career_form_id: archive.form_id,
+    career_submission_id: archive.submission_id,
+
+    // BASIC INFO
+    first_name: firstName || null,
+    last_name: lastName || null,
+    full_name_ar: safeString(cvData.fullNameArabic) || safeString(archive.cv_full_name_ar) || null,
+    profile_email: profileEmail || null,
+    cv_email: cvEmail || null,
+    phone: phone || null,
+    gender: safeString(cvData.gender) || safeString(archive.gender) || null,
+    nationality: safeString(cvData.nationality) || null,
+    location: location || null,
+
+    // CAREER
+    headline: targetJob || null,
+    target_job: targetJob || null,
+    career_level: careerLevel,
+    ai_summary: professionalSummary || null,
+    ats_score: atsScore,
+
+    // SNAPSHOT
+    career_snapshot: snapshotData,
+    snapshot_strengths: strengths,
+    snapshot_improvements: improvements,
+    snapshot_generated_at: snapshotData.snapshot_generated_at,
+
+    // CONTENT CACHE
+    skills,
+    education,
+    experience,
+    other_links: otherLinks,
+
+    // SYSTEM
+    updated_at: new Date().toISOString(),
+  };
+}_id,
     career_submission_id: archive.submission_id,
 
     career_level: careerLevel,
@@ -512,7 +539,7 @@ ${JSON.stringify(cvData, null, 2)}
       .from("profiles")
       .upsert(profilePayload, { onConflict: "id" })
       .select(
-        "id,username,career_form_id,career_submission_id,career_level,ats_score,ai_summary,target_job,snapshot_generated_at"
+        "id,user_id,username,career_form_id,career_submission_id,profile_email,career_level,ats_score,ai_summary,target_job,snapshot_generated_at"
       );
 
     if (profileError) {
