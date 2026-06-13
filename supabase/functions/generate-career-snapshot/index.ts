@@ -14,6 +14,29 @@ type SnapshotResult = {
   improvements?: unknown[];
 };
 
+type CvArchiveRow = {
+  form_id: string;
+  user_id: string;
+  submission_id: string | null;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone_number: string | null;
+  preferred_language: string | null;
+  region: string | null;
+  cv_first_name: string | null;
+  cv_last_name: string | null;
+  cv_full_name_ar: string | null;
+  cv_phone_number: string | null;
+  cv_email: string | null;
+  cv_target_job: string | null;
+  cv_data: Record<string, any> | null;
+  selected_language: string | null;
+  gender: string | null;
+  form_version: string | null;
+};
+
 function jsonResponse(payload: unknown, status = 200, headers: Record<string, string>) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -21,8 +44,12 @@ function jsonResponse(payload: unknown, status = 200, headers: Record<string, st
   });
 }
 
+function safeString(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 function normalizeCareerLevel(value: unknown) {
-  const raw = String(value || "").trim();
+  const raw = safeString(value);
   const allowed = new Set([
     "Fresh Graduate",
     "Junior",
@@ -43,7 +70,7 @@ function normalizeAtsScore(value: unknown) {
 function normalizeStringArray(value: unknown, fallback: string[]) {
   if (!Array.isArray(value)) return fallback;
   const cleaned = value
-    .map((item) => String(item || "").trim())
+    .map((item) => safeString(item))
     .filter(Boolean)
     .slice(0, 3);
 
@@ -52,6 +79,172 @@ function normalizeStringArray(value: unknown, fallback: string[]) {
   }
 
   return cleaned;
+}
+
+function normalizeTextArray(value: unknown, limit = 50) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((item) => safeString(item))
+        .filter(Boolean)
+    )
+  ).slice(0, limit);
+}
+
+function splitFullName(fullName: string) {
+  const cleaned = safeString(fullName).replace(/\s+/g, " ");
+  if (!cleaned) return { firstName: "", lastName: "" };
+
+  const parts = cleaned.split(" ");
+  return {
+    firstName: parts[0] || "",
+    lastName: parts.slice(1).join(" ") || "",
+  };
+}
+
+function buildDuration(item: any) {
+  const start = safeString(item?.startDate) ||
+    [safeString(item?.startMonth), safeString(item?.startYear)].filter(Boolean).join("/");
+  const end = item?.isCurrent
+    ? "Present"
+    : safeString(item?.endDate) ||
+      [safeString(item?.endMonth), safeString(item?.endYear)].filter(Boolean).join("/");
+
+  if (start && end) return `${start} - ${end}`;
+  return start || end || "";
+}
+
+function normalizeProfileExperience(workExperience: unknown) {
+  if (!Array.isArray(workExperience)) return [];
+
+  return workExperience
+    .map((item) => ({
+      title: safeString(item?.jobTitle || item?.title),
+      company: safeString(item?.company),
+      duration: buildDuration(item),
+      description: safeString(item?.responsibilities || item?.description),
+    }))
+    .filter((item) => item.title || item.company || item.description);
+}
+
+function normalizeProfileEducation(education: unknown) {
+  if (!Array.isArray(education)) return [];
+
+  return education
+    .map((item) => ({
+      degree: safeString(item?.degree),
+      institution: safeString(item?.university || item?.school || item?.institution),
+      major: safeString(item?.major),
+      year: safeString(item?.graduationYear || item?.endYear || item?.year),
+    }))
+    .filter((item) => item.degree || item.institution || item.major || item.year);
+}
+
+function buildProfilePayload(params: {
+  userId: string;
+  archive: CvArchiveRow;
+  userRow: Record<string, any> | null;
+  cvData: Record<string, any>;
+  snapshotData: Record<string, any>;
+  careerLevel: string;
+  atsScore: number;
+  professionalSummary: string;
+  strengths: string[];
+  improvements: string[];
+}) {
+  const {
+    userId,
+    archive,
+    userRow,
+    cvData,
+    snapshotData,
+    careerLevel,
+    atsScore,
+    professionalSummary,
+    strengths,
+    improvements,
+  } = params;
+
+  const fullName = safeString(cvData.fullName);
+  const splitName = splitFullName(fullName);
+
+  const firstName =
+    safeString(archive.cv_first_name) ||
+    safeString(archive.first_name) ||
+    safeString(userRow?.first_name) ||
+    splitName.firstName;
+
+  const lastName =
+    safeString(archive.cv_last_name) ||
+    safeString(archive.last_name) ||
+    safeString(userRow?.last_name) ||
+    splitName.lastName;
+
+  const targetJob =
+    safeString(cvData.targetJob) ||
+    safeString(archive.cv_target_job);
+
+  const location =
+    safeString(cvData.location) ||
+    safeString(cvData.currentLocation) ||
+    safeString(archive.region) ||
+    safeString(userRow?.region);
+
+  const phone =
+    safeString(cvData.phone) ||
+    safeString(archive.cv_phone_number) ||
+    safeString(archive.phone_number);
+
+  const cvEmail =
+    safeString(cvData.cvEmail) ||
+    safeString(archive.cv_email) ||
+    safeString(archive.email) ||
+    safeString(userRow?.email);
+
+  const skills = normalizeTextArray(cvData.technicalSkills, 80);
+  const education = normalizeProfileEducation(cvData.education);
+  const experience = normalizeProfileExperience(cvData.workExperience);
+
+  return {
+    id: userId,
+
+    first_name: firstName,
+    last_name: lastName,
+    username: safeString(archive.username) || safeString(userRow?.username) || null,
+
+    headline: targetJob || null,
+    location: location || null,
+    website: safeString(cvData.linkedin) || null,
+    phone: phone || null,
+
+    about: professionalSummary || null,
+    ai_summary: professionalSummary || null,
+
+    target_jobs: targetJob ? [targetJob] : [],
+    skills,
+    experience,
+    education,
+
+    full_name_ar: safeString(cvData.fullNameArabic) || safeString(archive.cv_full_name_ar) || null,
+    gender: safeString(cvData.gender) || safeString(archive.gender) || null,
+
+    nationality: safeString(cvData.nationality) || null,
+    cv_email: cvEmail || null,
+    target_job: targetJob || null,
+
+    career_form_id: archive.form_id,
+    career_submission_id: archive.submission_id,
+
+    career_level: careerLevel,
+    ats_score: atsScore,
+    career_snapshot: snapshotData,
+    snapshot_strengths: strengths,
+    snapshot_improvements: improvements,
+    snapshot_generated_at: snapshotData.snapshot_generated_at,
+
+    updated_at: new Date().toISOString(),
+  };
 }
 
 serve(async (req) => {
@@ -93,9 +286,9 @@ serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const userId = String(body?.userId || "").trim();
-    const formId = String(body?.formId || "").trim();
-    const language = String(body?.language || body?.lang || "en").trim() || "en";
+    const userId = safeString(body?.userId);
+    const formId = safeString(body?.formId);
+    const language = safeString(body?.language || body?.lang || "en") || "en";
 
     if (!userId) {
       return jsonResponse({ error: "Missing userId" }, 400, cors);
@@ -135,10 +328,20 @@ serve(async (req) => {
       );
     }
 
-    const cvData = archive.cv_data;
+    const cvData = (archive as CvArchiveRow).cv_data;
 
     if (!cvData || typeof cvData !== "object") {
       return jsonResponse({ error: "cv_archive.cv_data is empty" }, 400, cors);
+    }
+
+    const { data: userRow, error: userReadError } = await db
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (userReadError) {
+      throw new Error(`Failed to read users row: ${userReadError.message}`);
     }
 
     const prompt = `
@@ -236,7 +439,7 @@ ${JSON.stringify(cvData, null, 2)}
 
     const careerLevel = normalizeCareerLevel(parsed.career_level);
     const atsScore = normalizeAtsScore(parsed.ats_score);
-    const professionalSummary = String(parsed.professional_summary || "").trim();
+    const professionalSummary = safeString(parsed.professional_summary);
 
     const strengths = normalizeStringArray(parsed.strengths, [
       "Relevant professional experience",
@@ -249,6 +452,8 @@ ${JSON.stringify(cvData, null, 2)}
       "Strengthen role-specific keywords",
       "Clarify target job direction",
     ]);
+
+    const generatedAt = new Date().toISOString();
 
     const snapshotData = {
       career_level: careerLevel,
@@ -264,6 +469,7 @@ ${JSON.stringify(cvData, null, 2)}
         submission_id: archive.submission_id,
       },
       usage: aiData?.usage ?? null,
+      snapshot_generated_at: generatedAt,
     };
 
     const { data: updatedRows, error: updateError } = await db
@@ -275,7 +481,7 @@ ${JSON.stringify(cvData, null, 2)}
         snapshot_professional_summary: professionalSummary,
         snapshot_strengths: strengths,
         snapshot_improvements: improvements,
-        snapshot_generated_at: new Date().toISOString(),
+        snapshot_generated_at: generatedAt,
       })
       .eq("user_id", userId)
       .eq("form_id", formId)
@@ -289,6 +495,32 @@ ${JSON.stringify(cvData, null, 2)}
 
     const updated = Array.isArray(updatedRows) ? updatedRows[0] ?? null : null;
 
+    const profilePayload = buildProfilePayload({
+      userId,
+      archive: archive as CvArchiveRow,
+      userRow: userRow ?? null,
+      cvData,
+      snapshotData,
+      careerLevel,
+      atsScore,
+      professionalSummary,
+      strengths,
+      improvements,
+    });
+
+    const { data: profileRows, error: profileError } = await db
+      .from("profiles")
+      .upsert(profilePayload, { onConflict: "id" })
+      .select(
+        "id,username,career_form_id,career_submission_id,career_level,ats_score,ai_summary,target_job,snapshot_generated_at"
+      );
+
+    if (profileError) {
+      throw new Error(`Failed to upsert profiles: ${profileError.message}`);
+    }
+
+    const profile = Array.isArray(profileRows) ? profileRows[0] ?? null : null;
+
     return jsonResponse(
       {
         success: true,
@@ -296,6 +528,7 @@ ${JSON.stringify(cvData, null, 2)}
         userId,
         snapshot: snapshotData,
         updated,
+        profile,
       },
       200,
       cors
