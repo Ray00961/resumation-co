@@ -1294,6 +1294,24 @@ export default function ResumeForm() {
           const errText = await res.text();
           throw new Error(errText);
         }
+
+        await fetch(
+          `${SUPABASE_URL}/functions/v1/generate-career-snapshot`,
+          {
+            method: "POST",
+            headers: {
+              "apikey": SUPABASE_KEY,
+              "Authorization": authHeader,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              userId,
+              cvData,
+              language: lang,
+            }),
+          }
+        );
+        
         navigate("/dashboard");
 
       } else {
