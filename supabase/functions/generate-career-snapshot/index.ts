@@ -37,7 +37,11 @@ type CvArchiveRow = {
   form_version: string | null;
 };
 
-function jsonResponse(payload: unknown, status = 200, headers: Record<string, string>) {
+function jsonResponse(
+  payload: unknown,
+  status = 200,
+  headers: Record<string, string>,
+) {
   return new Response(JSON.stringify(payload), {
     status,
     headers,
@@ -69,6 +73,7 @@ function normalizeAtsScore(value: unknown) {
 
 function normalizeStringArray(value: unknown, fallback: string[]) {
   if (!Array.isArray(value)) return fallback;
+
   const cleaned = value
     .map((item) => safeString(item))
     .filter(Boolean)
@@ -83,12 +88,13 @@ function normalizeStringArray(value: unknown, fallback: string[]) {
 
 function normalizeTextArray(value: unknown, limit = 50) {
   if (!Array.isArray(value)) return [];
+
   return Array.from(
     new Set(
       value
         .map((item) => safeString(item))
-        .filter(Boolean)
-    )
+        .filter(Boolean),
+    ),
   ).slice(0, limit);
 }
 
@@ -104,12 +110,18 @@ function splitFullName(fullName: string) {
 }
 
 function buildDuration(item: any) {
-  const start = safeString(item?.startDate) ||
-    [safeString(item?.startMonth), safeString(item?.startYear)].filter(Boolean).join("/");
+  const start =
+    safeString(item?.startDate) ||
+    [safeString(item?.startMonth), safeString(item?.startYear)]
+      .filter(Boolean)
+      .join("/");
+
   const end = item?.isCurrent
     ? "Present"
     : safeString(item?.endDate) ||
-      [safeString(item?.endMonth), safeString(item?.endYear)].filter(Boolean).join("/");
+      [safeString(item?.endMonth), safeString(item?.endYear)]
+        .filter(Boolean)
+        .join("/");
 
   if (start && end) return `${start} - ${end}`;
   return start || end || "";
@@ -134,11 +146,52 @@ function normalizeProfileEducation(education: unknown) {
   return education
     .map((item) => ({
       degree: safeString(item?.degree),
-      institution: safeString(item?.university || item?.school || item?.institution),
+      institution: safeString(
+        item?.university || item?.school || item?.institution,
+      ),
       major: safeString(item?.major),
       year: safeString(item?.graduationYear || item?.endYear || item?.year),
     }))
     .filter((item) => item.degree || item.institution || item.major || item.year);
+}
+
+function normalizeOtherLinks(cvData: Record<string, any>) {
+  const links: { type: string; url: string }[] = [];
+
+  const addLink = (type: string, urlValue: unknown) => {
+    const url = safeString(urlValue);
+    if (!url) return;
+
+    const exists = links.some(
+      (item) => item.type === type && item.url.toLowerCase() === url.toLowerCase(),
+    );
+
+    if (!exists) {
+      links.push({ type, url });
+    }
+  };
+
+  addLink("linkedin", cvData?.linkedin);
+
+  const rawOtherLinks = cvData?.otherLinks || cvData?.other_links || cvData?.links;
+
+  if (Array.isArray(rawOtherLinks)) {
+    rawOtherLinks.forEach((item) => {
+      if (typeof item === "string") {
+        addLink("other", item);
+        return;
+      }
+
+      if (item && typeof item === "object") {
+        addLink(
+          safeString(item.type || item.label || "other") || "other",
+          item.url || item.link || item.value,
+        );
+      }
+    });
+  }
+
+  return links.slice(0, 10);
 }
 
 function buildProfilePayload(params: {
@@ -169,9 +222,7 @@ function buildProfilePayload(params: {
   const fullName = safeString(cvData.fullName);
   const splitName = splitFullName(fullName);
 
-  const username =
-    safeString(archive.username) ||
-    safeString(userRow?.username);
+  const username = safeString(archive.username) || safeString(userRow?.username);
 
   if (!username) {
     throw new Error("Missing username for profiles upsert");
@@ -189,9 +240,7 @@ function buildProfilePayload(params: {
     safeString(userRow?.last_name) ||
     splitName.lastName;
 
-  const targetJob =
-    safeString(cvData.targetJob) ||
-    safeString(archive.cv_target_job);
+  const targetJob = safeString(cvData.targetJob) || safeString(archive.cv_target_job);
 
   const location =
     safeString(cvData.location) ||
@@ -210,9 +259,7 @@ function buildProfilePayload(params: {
     safeString(archive.email) ||
     safeString(userRow?.email);
 
-  const profileEmail =
-    safeString(userRow?.email) ||
-    cvEmail;
+  const profileEmail = safeString(userRow?.email) || cvEmail;
 
   const skills = normalizeTextArray(cvData.technicalSkills, 80);
   const education = normalizeProfileEducation(cvData.education);
@@ -220,7 +267,7 @@ function buildProfilePayload(params: {
   const otherLinks = normalizeOtherLinks(cvData);
 
   return {
-    // IDENTITY — must stay immutable after insert
+    // IDENTITY — locked by DB trigger after insert
     id: userId,
     user_id: userId,
     username,
@@ -230,7 +277,10 @@ function buildProfilePayload(params: {
     // BASIC INFO
     first_name: firstName || null,
     last_name: lastName || null,
-    full_name_ar: safeString(cvData.fullNameArabic) || safeString(archive.cv_full_name_ar) || null,
+    full_name_ar:
+      safeString(cvData.fullNameArabic) ||
+      safeString(archive.cv_full_name_ar) ||
+      null,
     profile_email: profileEmail || null,
     cv_email: cvEmail || null,
     phone: phone || null,
@@ -258,18 +308,6 @@ function buildProfilePayload(params: {
     other_links: otherLinks,
 
     // SYSTEM
-    updated_at: new Date().toISOString(),
-  };
-}_id,
-    career_submission_id: archive.submission_id,
-
-    career_level: careerLevel,
-    ats_score: atsScore,
-    career_snapshot: snapshotData,
-    snapshot_strengths: strengths,
-    snapshot_improvements: improvements,
-    snapshot_generated_at: snapshotData.snapshot_generated_at,
-
     updated_at: new Date().toISOString(),
   };
 }
@@ -351,7 +389,7 @@ serve(async (req) => {
             "No matching career_profile cv_archive row found for this userId and formId",
         },
         404,
-        cors
+        cors,
       );
     }
 
@@ -420,7 +458,7 @@ ${JSON.stringify(
     form_version: archive.form_version,
   },
   null,
-  2
+  2,
 )}
 
 Candidate CV data:
@@ -513,7 +551,7 @@ ${JSON.stringify(cvData, null, 2)}
       .eq("user_id", userId)
       .eq("form_id", formId)
       .select(
-        "form_id,user_id,submission_id,career_level,ats_score,snapshot_professional_summary,snapshot_strengths,snapshot_improvements,snapshot_generated_at,career_snapshot"
+        "form_id,user_id,submission_id,career_level,ats_score,snapshot_professional_summary,snapshot_strengths,snapshot_improvements,snapshot_generated_at,career_snapshot",
       );
 
     if (updateError) {
@@ -539,7 +577,7 @@ ${JSON.stringify(cvData, null, 2)}
       .from("profiles")
       .upsert(profilePayload, { onConflict: "id" })
       .select(
-        "id,user_id,username,career_form_id,career_submission_id,profile_email,career_level,ats_score,ai_summary,target_job,snapshot_generated_at"
+        "id,user_id,username,career_form_id,career_submission_id,profile_email,career_level,ats_score,ai_summary,target_job,snapshot_generated_at",
       );
 
     if (profileError) {
@@ -558,7 +596,7 @@ ${JSON.stringify(cvData, null, 2)}
         profile,
       },
       200,
-      cors
+      cors,
     );
   } catch (err: any) {
     console.error("generate-career-snapshot error:", err);
@@ -569,7 +607,7 @@ ${JSON.stringify(cvData, null, 2)}
         error: err?.message ?? "Unknown error",
       },
       500,
-      cors
+      cors,
     );
   }
 });
