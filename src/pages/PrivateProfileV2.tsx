@@ -501,17 +501,60 @@ export default function PrivateProfileV2() {
   };
 
   useEffect(() => {
+    let cancelled = false;
+
+    const getCachedSession = () => {
+      const lsKey = Object.keys(localStorage).find(
+        (k) => k.startsWith("sb-") && k.endsWith("-auth-token"),
+      );
+
+      if (!lsKey) return null;
+
+      try {
+        const cached = JSON.parse(localStorage.getItem(lsKey) || "null");
+        if (!cached?.user?.id) return null;
+
+        return {
+          user: cached.user,
+          access_token: cached.access_token || "",
+        };
+      } catch {
+        return null;
+      }
+    };
+
+    const getSafeSession = async () => {
+      const cached = getCachedSession();
+      if (cached?.user?.id) return cached;
+
+      const sessionPromise = supabase.auth.getSession();
+      const timeoutPromise = new Promise<null>((resolve) => {
+        window.setTimeout(() => resolve(null), 6000);
+      });
+
+      const result = await Promise.race([sessionPromise, timeoutPromise]);
+      if (!result || !("data" in result)) return null;
+
+      const session = result.data.session;
+      if (!session?.user?.id) return null;
+
+      return {
+        user: session.user,
+        access_token: session.access_token || "",
+      };
+    };
+
     const init = async () => {
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const session = sessionData.session;
-        if (!session) {
-          window.location.replace("/login");
+        const session = await getSafeSession();
+
+        if (!session?.user?.id) {
+          if (!cancelled) window.location.replace("/login");
           return;
         }
 
         const uid = session.user.id;
-        setUserId(uid);
+        if (!cancelled) setUserId(uid);
 
         const googleName = cleanText(session.user.user_metadata?.full_name);
         const nameParts = googleName.split(" ").filter(Boolean);
@@ -524,24 +567,44 @@ export default function PrivateProfileV2() {
           avatar_url: session.user.user_metadata?.avatar_url ?? "",
         };
 
-        const { data: rows, error } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("user_id", uid)
-          .limit(1);
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+        const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-        if (error) throw error;
-        setData(profileFromRow(Array.isArray(rows) ? rows[0] : null, fallback));
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${encodeURIComponent(uid)}&select=*&limit=1`,
+          {
+            headers: {
+              apikey: SUPABASE_KEY,
+              Authorization: `Bearer ${session.access_token || SUPABASE_KEY}`,
+            },
+          },
+        );
+
+        if (!res.ok) throw new Error(await res.text());
+
+        const rows = await res.json();
+        const row = Array.isArray(rows) ? rows[0] ?? null : null;
+
+        if (!row) {
+          if (!cancelled) navigate("/build", { replace: true });
+          return;
+        }
+
+        if (!cancelled) setData(profileFromRow(row, fallback));
       } catch (err) {
         console.error("PrivateProfileV2 load error", err);
-        toast.error(t.error);
+        if (!cancelled) toast.error(t.error);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     init();
-  }, [t.error]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate, t.error]);
 
   const savePartial = async (partial: Record<string, any>) => {
     if (!userId) throw new Error("Missing user");
