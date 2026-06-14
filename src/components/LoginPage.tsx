@@ -253,37 +253,73 @@ const LoginPage = () => {
         if (pending) localStorage.removeItem("pending_user_data");
       }
 
-      const { data: userData, error } = await withTimeout(
+      const { data: userData, error: userErr } = await withTimeout(
         supabase
           .from("users")
-          .select("username, first_name")
+          .select("id, username, first_name, last_name")
           .eq("id", uid)
           .maybeSingle(),
         10000,
-        "users profile lookup",
+        "users lookup",
       );
 
-      if (error) throw error;
+      if (userErr) throw userErr;
 
+      // Existing account rule:
+      // A real returning user must exist in all 3 layers:
+      // users + cv_archive + profiles.
+      // If users exists but career profile is not finished yet, continue to /build.
       if (userData?.username) {
-        window.location.replace("/dashboard");
-      } else {
-        const fullName: string = user.user_metadata?.full_name || "";
-        const parts = fullName.trim().split(" ");
+        const [{ data: archiveRow, error: archiveErr }, { data: profileRow, error: profileErr }] = await Promise.all([
+          withTimeout(
+            supabase
+              .from("cv_archive")
+              .select("user_id, form_id, submission_id")
+              .eq("user_id", uid)
+              .eq("snapshot_enabled", true)
+              .order("created_at_utc", { ascending: true })
+              .limit(1)
+              .maybeSingle(),
+            10000,
+            "cv_archive lookup",
+          ),
+          withTimeout(
+            supabase
+              .from("profiles")
+              .select("user_id, username, career_form_id, career_submission_id")
+              .eq("user_id", uid)
+              .maybeSingle(),
+            10000,
+            "profiles lookup",
+          ),
+        ]);
 
-        setFirstName(parts[0] || "");
-        setLastName(parts.slice(1).join(" ") || "");
-        setProcessing(false);
-        setStepSync("setup");
+        if (archiveErr) throw archiveErr;
+        if (profileErr) throw profileErr;
+
+        if (archiveRow?.form_id && archiveRow?.submission_id && profileRow?.user_id) {
+          window.location.replace("/profile");
+        } else {
+          window.location.replace("/build");
+        }
+        return;
       }
+
+      const fullName: string = user.user_metadata?.full_name || "";
+      const parts = fullName.trim().split(" ");
+
+      setFirstName(parts[0] || "");
+      setLastName(parts.slice(1).join(" ") || "");
+      setProcessing(false);
+      setStepSync("setup");
     } catch (err: any) {
       if (err?.name === "AbortError" || err?.code === 20) {
         if (processingRef.current) clearTimeout(processingRef.current);
         return;
       }
 
-      if (String(err?.message || "").includes("users profile lookup timed out")) {
-        window.location.replace("/dashboard");
+      if (String(err?.message || "").includes("lookup timed out")) {
+        window.location.replace("/profile");
         return;
       }
 
@@ -453,24 +489,8 @@ const LoginPage = () => {
       return;
     }
 
-    const { error: pErr } = await supabase.from("profiles").upsert(
-      {
-        id: userId,
-        user_id: userId,
-        username: username.trim(),
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        profile_email: liveSession.user.email ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" },
-    );
-
-    if (pErr) {
-      setSaving(false);
-      toast.error(pErr.message);
-      return;
-    }
+    // Account creation writes only to users.
+    // The first ResumeForm submission creates cv_archive and materializes profiles.
 
     setSaving(false);
     toast.success(

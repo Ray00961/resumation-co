@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useRef } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../supabase";
 import { useLang } from "../context/LanguageContext";
 import * as pdfjsLib from "pdfjs-dist";
@@ -683,8 +683,21 @@ const stepTitles = [
 
 export default function ResumeForm() {
   const navigate    = useNavigate();
-  const { id: archiveId } = useParams<{ id?: string }>();
-  const isEditMode  = !!archiveId;
+  const location    = useLocation();
+  const { id: legacyFormId } = useParams<{ id?: string }>();
+
+  const searchParams = new URLSearchParams(location.search);
+  const queryFormId = searchParams.get("form_id") || "";
+  const querySubmissionId = searchParams.get("submission_id") || "";
+  const editModeParam = searchParams.get("mode") || "";
+
+  // New users arrive at /build with no query params and always use the new form flow.
+  // Profile edits arrive from PrivateProfileV2 at /build?form_id=...&submission_id=...&mode=edit-profile
+  // and must load/update the original cv_archive row instead of creating a new one.
+  const isProfileEditMode = editModeParam === "edit-profile" && !!queryFormId && !!querySubmissionId;
+  const editFormId = isProfileEditMode ? queryFormId : (legacyFormId || "");
+  const editSubmissionId = isProfileEditMode ? querySubmissionId : "";
+  const isEditMode  = isProfileEditMode || !!legacyFormId;
   const { lang, setLang, isRtl } = useLang();
   const [step, setStep]           = useState(1);
   const [submitting, setSubmitting] = useState(false);
@@ -792,10 +805,14 @@ export default function ResumeForm() {
       };
 
       // ── EDIT MODE: load existing cv_archive row ──
-      if (archiveId) {
+      if (isEditMode && editFormId) {
         try {
+          const archiveFilters = isProfileEditMode
+            ? `form_id=eq.${encodeURIComponent(editFormId)}&submission_id=eq.${encodeURIComponent(editSubmissionId)}&user_id=eq.${uid}`
+            : `form_id=eq.${encodeURIComponent(editFormId)}&user_id=eq.${uid}`;
+
           const res = await fetch(
-            `${SUPABASE_URL}/rest/v1/cv_archive?form_id=eq.${archiveId}&user_id=eq.${uid}&select=*`,
+            `${SUPABASE_URL}/rest/v1/cv_archive?${archiveFilters}&select=*&limit=1`,
             { headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader } }
           );
           const rows = await res.json();
@@ -836,6 +853,7 @@ export default function ResumeForm() {
         } catch (err) {
           console.error("Edit-mode fetch error:", err);
         }
+        setDraftLoaded(true);
         return; // stop here in edit mode
       }
 
@@ -892,7 +910,7 @@ export default function ResumeForm() {
     };
 
     init();
-  }, [navigate, archiveId]);
+  }, [navigate, legacyFormId, location.search]);
 
   // ── Auto-save draft to localStorage (new mode only, debounced 800ms) ──
   useEffect(() => {
@@ -1291,13 +1309,17 @@ export default function ResumeForm() {
         region:             userRow.region             || null,
       };
 
-      if (isEditMode && archiveId) {
+      if (isEditMode && editFormId) {
         // ── EDIT MODE: update existing cv_archive row only ──
         // Snapshot is regenerated only if this exact row is still the user's career profile.
         let existingArchiveRow: Record<string, any> | null = null;
+        const archiveFilters = isProfileEditMode
+          ? `form_id=eq.${encodeURIComponent(editFormId)}&submission_id=eq.${encodeURIComponent(editSubmissionId)}&user_id=eq.${userId}`
+          : `form_id=eq.${encodeURIComponent(editFormId)}&user_id=eq.${userId}`;
+
         try {
           const existingArchiveRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/cv_archive?form_id=eq.${archiveId}&user_id=eq.${userId}&select=form_id,form_purpose,snapshot_enabled&limit=1`,
+            `${SUPABASE_URL}/rest/v1/cv_archive?${archiveFilters}&select=form_id,submission_id,form_purpose,snapshot_enabled&limit=1`,
             { headers: { "apikey": SUPABASE_KEY, "Authorization": authHeader } }
           );
           if (existingArchiveRes.ok) {
@@ -1308,8 +1330,12 @@ export default function ResumeForm() {
           existingArchiveRow = null;
         }
 
+        if (!existingArchiveRow) {
+          throw new Error("Original cv_archive row was not found for this user.");
+        }
+
         const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/cv_archive?form_id=eq.${archiveId}&user_id=eq.${userId}`,
+          `${SUPABASE_URL}/rest/v1/cv_archive?${archiveFilters}`,
           {
             method: "PATCH",
             headers: {
@@ -1346,10 +1372,10 @@ export default function ResumeForm() {
           existingArchiveRow?.snapshot_enabled === true;
 
         if (shouldRegenerateSnapshot) {
-          await generateSnapshotForForm(archiveId);
+          await generateSnapshotForForm(editFormId);
         }
 
-        navigate("/dashboard");
+        navigate(isProfileEditMode ? "/profile" : "/dashboard");
 
       } else {
         // ── NEW MODE: scan cv_archive before inserting ──
@@ -1431,39 +1457,11 @@ export default function ResumeForm() {
           await generateSnapshotForForm(formId);
         }
 
-        // Clear draft after successful submit
+        // Clear draft after successful submit.
+        // Profiles are not manually synced here anymore. cv_archive remains the source of truth;
+        // when snapshot_enabled=true, generate-career-snapshot materializes the Career Profile.
         if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
-        navigate(`/dashboard`);
-
-        // Non-blocking: sync key fields to profiles (Direct Fetch — SDK banned for profiles)
-        fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
-          method: "POST",
-          headers: {
-            "apikey": SUPABASE_KEY,
-            "Authorization": authHeader,
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-          },
-          body: JSON.stringify({
-            id:          userId,
-            full_name_ar: form.fullNameArabic || null,
-            gender:      form.gender || null,
-            phone:       fullPhone,
-            target_jobs: form.targetJob ? [form.targetJob] : [],
-            skills:      form.technicalSkills,
-            headline:    form.targetJob || "",
-            experience:  workExperience
-              .filter(w => w.jobTitle || w.company)
-              .map(w => ({
-                title:       w.jobTitle,
-                company:     w.company,
-                industry:    w.industry,
-                duration:    `${w.startDate}${w.endDate ? " - " + w.endDate : ""}`.trim(),
-                description: w.responsibilities,
-              })),
-            updated_at: new Date().toISOString(),
-          }),
-        }).catch(e => console.warn("Profile sync (non-critical):", e));
+        navigate(`/profile`);
 
       }
     } catch (err: any) {
