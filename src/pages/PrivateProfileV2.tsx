@@ -339,7 +339,10 @@ export default function PrivateProfileV2() {
       private: "Private",
       public: "Public",
       noPlan: "Free profile",
-      identity: "Identity",
+      identity: "Profile Identity",
+      publicLink: "Public Profile Link",
+      usernameLabel: "Username",
+      qrStatus: "QR Status",
       formId: "Career Form ID",
       submissionId: "Submission ID",
       professionalSummary: "Professional Summary",
@@ -402,6 +405,9 @@ export default function PrivateProfileV2() {
       public: "عام",
       noPlan: "ملف مجاني",
       identity: "هوية الملف",
+      publicLink: "رابط الملف العام",
+      usernameLabel: "اسم المستخدم",
+      qrStatus: "حالة QR",
       formId: "رقم فورم الملف المهني",
       submissionId: "رقم الإرسال",
       professionalSummary: "الملخص المهني",
@@ -454,6 +460,7 @@ export default function PrivateProfileV2() {
   const publicSkills = isPaid ? data.skills : data.skills.slice(0, 3);
   const publicLanguages = isPaid ? data.languages : pickFreeLanguages(data.languages);
   const latestEdu = data.education[0] || null;
+  const publicProfileUrl = data.username ? `https://resumation.co/u/${data.username}` : "";
 
   const goToCareerForm = () => {
     const params = new URLSearchParams({ mode: "edit-profile" });
@@ -842,12 +849,40 @@ export default function PrivateProfileV2() {
         </Card>
 
         <Card title={t.identity}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <LockedValue label="Profile ID" value={data.id || "—"} />
-            <LockedValue label="User ID" value={data.user_id || "—"} />
-            <LockedValue label="Username" value={data.username ? `@${data.username}` : "—"} />
-            <LockedValue label={t.formId} value={data.career_form_id || "—"} />
-            <LockedValue label={t.submissionId} value={data.career_submission_id || "—"} />
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <InfoText label={t.usernameLabel} value={data.username ? `@${data.username}` : "—"} />
+              <InfoText label={t.publicLink} value={publicProfileUrl ? publicProfileUrl.replace("https://", "") : "—"} />
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={copyPublicLink} disabled={!data.username} className="btn-muted disabled:opacity-50 disabled:cursor-not-allowed" style={{ color: copied ? "#34d399" : "#A8B4CC" }}>
+                {copied ? <CheckCheck className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {copied ? t.copied : t.copy}
+              </button>
+              <button onClick={() => data.username && navigate(`/u/${data.username}`)} disabled={!data.username} className="btn-cyan disabled:opacity-50 disabled:cursor-not-allowed">
+                <ExternalLink className="w-3 h-3" /> {t.viewPublic}
+              </button>
+            </div>
+
+            <div className="rounded-xl p-4 flex items-start gap-4" style={{ background: "rgba(60,80,125,0.05)", border: "1px solid rgba(60,80,125,0.14)" }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(18,178,193,0.07)", border: "1px solid rgba(18,178,193,0.15)" }}>
+                <QrCode className="w-5 h-5 text-[#12B2C1]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-[#E0C58F] uppercase tracking-widest mb-1">{t.qrStatus}</p>
+                {!isPaid ? (
+                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrLocked}</p>
+                ) : data.qr_enabled && data.qr_public_url ? (
+                  <>
+                    <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrReady}</p>
+                    <button onClick={copyQrLink} className="btn-muted mt-3"><Copy className="w-3 h-3" /> {copied ? t.copied : t.copy}</button>
+                  </>
+                ) : (
+                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrSoon}</p>
+                )}
+              </div>
+            </div>
           </div>
         </Card>
 
@@ -939,32 +974,6 @@ export default function PrivateProfileV2() {
           <InlineEditButton onClick={goToCareerForm} label={t.editCareerForm} />
         </Card>
 
-        <Card title={t.qrProfile}>
-          <div className="flex items-start gap-4">
-            <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(18,178,193,0.07)", border: "1px solid rgba(18,178,193,0.15)" }}>
-              <QrCode className="w-5 h-5 text-[#12B2C1]" />
-            </div>
-            <div className="flex-1">
-              {!isPaid ? (
-                <>
-                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrLocked}</p>
-                  <button onClick={() => navigate("/pricing")} className="btn-primary mt-3">{t.upgrade}</button>
-                </>
-              ) : data.qr_enabled && data.qr_public_url ? (
-                <>
-                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrReady}</p>
-                  <button onClick={copyQrLink} className="btn-muted mt-3"><Copy className="w-3 h-3" /> {copied ? t.copied : t.copy}</button>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrSoon}</p>
-                  <button disabled className="btn-muted mt-3 opacity-60 cursor-not-allowed"><QrCode className="w-3 h-3" /> {t.generateQr}</button>
-                </>
-              )}
-            </div>
-          </div>
-        </Card>
-
         <Card title={t.publicPreview}>
           <p className="text-xs text-[#A8B4CC] leading-[1.8] mb-4">{t.publicPreviewText}</p>
           <div className="space-y-4 rounded-2xl p-4" style={{ background: "rgba(60,80,125,0.04)", border: "1px solid rgba(60,80,125,0.12)" }}>
@@ -1029,15 +1038,6 @@ function Chip({ children }: { children: React.ReactNode }) {
     <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#12B2C1]" style={{ background: "rgba(18,178,193,0.07)", border: "1px solid rgba(18,178,193,0.15)" }}>
       {children}
     </span>
-  );
-}
-
-function LockedValue({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl p-3" style={{ background: "rgba(60,80,125,0.05)", border: "1px solid rgba(60,80,125,0.14)" }}>
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[#E0C58F] mb-1"><Lock className="w-3 h-3" />{label}</div>
-      <div className="font-mono text-[11px] text-[#A8B4CC] break-all">{value || "—"}</div>
-    </div>
   );
 }
 
