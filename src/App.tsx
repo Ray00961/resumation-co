@@ -21,7 +21,7 @@ import PricingDescription from "./components/PricingDescription";
 import CareerAnalysis from "./components/CareerAnalysis";
 import SuccessPage from "./components/SuccessPage";
 import ContactPage from "./components/ContactPage";
-import PrivateProfile from "./pages/PrivateProfile";
+import PrivateProfileV2 from "./pages/PrivateProfileV2";
 import PublicProfile from "./pages/PublicProfile";
 import Terms from "./components/Terms";
 import Privacy from "./components/Privacy";
@@ -107,7 +107,7 @@ export default function App() {
                 <ProtectedRoute><SidebarLayout><CareerAnalysis /></SidebarLayout></ProtectedRoute>
               }/>
               <Route path="/profile" element={
-                <ProtectedRoute><SidebarLayout><PrivateProfile /></SidebarLayout></ProtectedRoute>
+                <ProtectedRoute><SidebarLayout><PrivateProfileV2 /></SidebarLayout></ProtectedRoute>
               }/>
 
               {/* ══ PROTECTED — Full screen ══ */}
