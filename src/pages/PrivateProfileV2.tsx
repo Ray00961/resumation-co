@@ -314,8 +314,8 @@ function getSocialProfileName(urlValue: unknown) {
       const inIndex = parts.findIndex((part) =>
         ["in", "company", "school"].includes(part.toLowerCase()),
       );
-      return decodeURIComponent(parts[inIndex >= 0 ? inIndex + 1 : parts[0]] || parts[0])
-        .replace(/[-_]+/g, " ");
+      const profilePart = parts[inIndex >= 0 ? inIndex + 1 : 0] || parts[0] || "";
+      return decodeURIComponent(profilePart).replace(/[-_]+/g, " ");
     }
 
     if (host.includes("tiktok.com")) {
