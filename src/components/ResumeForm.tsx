@@ -124,9 +124,12 @@ const defaultOtherLink: OtherLinkEntry = { type: "LinkedIn", url: "" };
 
 const OTHER_LINK_TYPES = [
   "LinkedIn",
+  "Website",
   "Portfolio",
   "GitHub",
-  "Website",
+  "Facebook",
+  "Instagram",
+  "TikTok",
   "Other",
 ];
 
@@ -1264,6 +1267,20 @@ function normalizeOtherLink(raw: Partial<OtherLinkEntry> = {}): OtherLinkEntry {
     type: String(raw.type || "Other").trim() || "Other",
     url: String(raw.url || "").trim(),
   };
+}
+
+function getOtherLinkPlaceholder(type: string, isRtl: boolean) {
+  const normalized = String(type || "").toLowerCase();
+
+  if (normalized.includes("linkedin")) return "https://www.linkedin.com/in/username";
+  if (normalized.includes("facebook")) return "https://www.facebook.com/username";
+  if (normalized.includes("instagram")) return "https://www.instagram.com/username";
+  if (normalized.includes("tiktok")) return "https://www.tiktok.com/@username";
+  if (normalized.includes("github")) return "https://github.com/username";
+  if (normalized.includes("portfolio")) return "https://portfolio.com";
+  if (normalized.includes("website")) return "https://yourwebsite.com";
+
+  return isRtl ? "https://example.com" : "https://example.com";
 }
 
 function buildSuggestions(rows: any[]): Record<string, string[]> {
@@ -4312,16 +4329,14 @@ export default function ResumeForm() {
                     </select>
                     <input
                       className={inputCls}
-                      placeholder={
-                        isRtl ? "https://example.com" : "https://example.com"
-                      }
+                      placeholder={getOtherLinkPlaceholder(link.type, isRtl)}
                       value={link.url}
                       onChange={(e) => setOtherLink(i, "url", e.target.value)}
                       dir="ltr"
                     />
                   </div>
                 ))}
-                {form.otherLinks.length < 5 && (
+                {form.otherLinks.length < 8 && (
                   <button
                     onClick={() =>
                       set("otherLinks", [
