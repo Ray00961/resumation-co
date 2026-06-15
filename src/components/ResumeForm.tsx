@@ -2306,6 +2306,7 @@ export default function ResumeForm() {
   // ── Submit (Direct Fetch — all cv_archive writes bypass SDK) ──
   const handleSubmit = async () => {
     if (!userId || !form.agreedToTerms) return;
+
     setSubmitting(true);
 
     const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -2318,6 +2319,9 @@ export default function ResumeForm() {
         null)
       : null;
     const authHeader = `Bearer ${accessToken ?? SUPABASE_KEY}`;
+
+    const sleep = (ms: number) =>
+      new Promise((resolve) => window.setTimeout(resolve, ms));
 
     const fullPhone = `${form.phoneCode} ${form.phone}`.trim();
     const workExperience = form.work.map((w) => ({
@@ -2340,7 +2344,7 @@ export default function ResumeForm() {
       targetJob: form.targetJob,
       workExperience,
       education: form.education,
-      technicalSkills: form.technicalSkills, // array — not joined
+      technicalSkills: form.technicalSkills,
       languages: {
         arabic: form.langArabic,
         english: form.langEnglish,
@@ -2354,56 +2358,85 @@ export default function ResumeForm() {
         .filter((link) => link.type && link.url),
     };
 
-    const generateSnapshotForForm = async (formId: string) => {
-      if (!userId || !formId) return;
+    const readRows = async <T = any,>(url: string): Promise<T[]> => {
+      const res = await fetch(url, {
+        headers: { apikey: SUPABASE_KEY, Authorization: authHeader },
+      });
 
-      try {
-        const snapshotRes = await fetch(
-          `${SUPABASE_URL}/functions/v1/generate-career-snapshot`,
-          {
-            method: "POST",
-            headers: {
-              apikey: SUPABASE_KEY,
-              Authorization: authHeader,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              userId,
-              formId,
-              language: lang,
-            }),
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(errText || `Read failed: ${res.status}`);
+      }
+
+      const rows = await res.json().catch(() => []);
+      return Array.isArray(rows) ? rows : [];
+    };
+
+    const generateSnapshotForForm = async (formId: string) => {
+      if (!userId || !formId) {
+        throw new Error("Missing userId or formId for snapshot generation");
+      }
+
+      const snapshotRes = await fetch(
+        `${SUPABASE_URL}/functions/v1/generate-career-snapshot`,
+        {
+          method: "POST",
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: authHeader,
+            "Content-Type": "application/json",
           },
+          body: JSON.stringify({
+            userId,
+            formId,
+            language: lang,
+          }),
+        },
+      );
+
+      const snapshotBody = await snapshotRes.json().catch(async () => {
+        const text = await snapshotRes.text().catch(() => "");
+        return text ? { error: text } : {};
+      });
+
+      if (!snapshotRes.ok || snapshotBody?.success === false) {
+        throw new Error(
+          snapshotBody?.error ||
+            `Career snapshot generation failed: ${snapshotRes.status}`,
+        );
+      }
+
+      return snapshotBody;
+    };
+
+    const waitForProfileMaterialization = async () => {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        const rows = await readRows(
+          `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${encodeURIComponent(userId)}&select=id,user_id,career_form_id,career_submission_id&limit=1`,
         );
 
-        if (!snapshotRes.ok) {
-          const snapshotText = await snapshotRes.text().catch(() => "");
-          console.warn(
-            "Career snapshot generation failed:",
-            snapshotText || snapshotRes.status,
-          );
-        }
-      } catch (snapshotErr) {
-        console.warn("Career snapshot generation failed:", snapshotErr);
+        if (rows.length > 0) return rows[0];
+
+        await sleep(750);
       }
+
+      throw new Error(
+        "Career Profile was saved, but profile materialization did not finish. Please try again.",
+      );
     };
 
     try {
       // ── Fetch user profile from users table ──
       let userRow: Record<string, any> = {};
       try {
-        const uRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/users?id=eq.${userId}&select=username,first_name,last_name,email,preferred_language,region`,
-          { headers: { apikey: SUPABASE_KEY, Authorization: authHeader } },
+        const uRows = await readRows<Record<string, any>>(
+          `${SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(userId)}&select=username,first_name,last_name,email,preferred_language,region&limit=1`,
         );
-        if (uRes.ok) {
-          const uRows = await uRes.json();
-          if (Array.isArray(uRows) && uRows.length > 0) userRow = uRows[0];
-        }
+        if (uRows.length > 0) userRow = uRows[0];
       } catch {
         /* non-critical — fallback to empty */
       }
 
-      // Shared user columns (from users table)
       const userColumns = {
         username: userRow.username || null,
         first_name: userRow.first_name || null,
@@ -2413,28 +2446,34 @@ export default function ResumeForm() {
         region: userRow.region || null,
       };
 
+      const archivePayload = {
+        ...userColumns,
+        user_id: userId,
+        cv_data: cvData,
+        cv_full_name_ar: form.fullNameArabic || null,
+        gender: form.gender || null,
+        form_version: "v3",
+        cv_target_job: form.targetJob,
+        cv_first_name: form.fullName.split(" ")[0] || form.fullName,
+        cv_last_name: form.fullName.split(" ").slice(1).join(" ") || "",
+        cv_email: form.cvEmail,
+        phone_number: fullPhone,
+        cv_phone_number: fullPhone,
+        agreed_to_terms: true,
+      };
+
       if (isEditMode && editFormId) {
         // ── EDIT MODE: update existing cv_archive row only ──
         // Snapshot is regenerated only if this exact row is still the user's career profile.
         let existingArchiveRow: Record<string, any> | null = null;
         const archiveFilters = isProfileEditMode
-          ? `form_id=eq.${encodeURIComponent(editFormId)}&submission_id=eq.${encodeURIComponent(editSubmissionId)}&user_id=eq.${userId}`
-          : `form_id=eq.${encodeURIComponent(editFormId)}&user_id=eq.${userId}`;
+          ? `form_id=eq.${encodeURIComponent(editFormId)}&submission_id=eq.${encodeURIComponent(editSubmissionId)}&user_id=eq.${encodeURIComponent(userId)}`
+          : `form_id=eq.${encodeURIComponent(editFormId)}&user_id=eq.${encodeURIComponent(userId)}`;
 
-        try {
-          const existingArchiveRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/cv_archive?${archiveFilters}&select=form_id,submission_id,form_purpose,snapshot_enabled&limit=1`,
-            { headers: { apikey: SUPABASE_KEY, Authorization: authHeader } },
-          );
-          if (existingArchiveRes.ok) {
-            const existingArchiveRows = await existingArchiveRes.json();
-            existingArchiveRow = Array.isArray(existingArchiveRows)
-              ? (existingArchiveRows[0] ?? null)
-              : null;
-          }
-        } catch {
-          existingArchiveRow = null;
-        }
+        const existingArchiveRows = await readRows<Record<string, any>>(
+          `${SUPABASE_URL}/rest/v1/cv_archive?${archiveFilters}&select=form_id,submission_id,form_purpose,snapshot_enabled&limit=1`,
+        );
+        existingArchiveRow = existingArchiveRows[0] ?? null;
 
         if (!existingArchiveRow) {
           throw new Error(
@@ -2452,21 +2491,7 @@ export default function ResumeForm() {
               "Content-Type": "application/json",
               Prefer: "return=minimal",
             },
-            body: JSON.stringify({
-              ...userColumns,
-              user_id: userId,
-              cv_data: cvData,
-              cv_full_name_ar: form.fullNameArabic || null,
-              gender: form.gender || null,
-              form_version: "v3",
-              cv_target_job: form.targetJob,
-              cv_first_name: form.fullName.split(" ")[0] || form.fullName,
-              cv_last_name: form.fullName.split(" ").slice(1).join(" ") || "",
-              cv_email: form.cvEmail,
-              phone_number: fullPhone,
-              cv_phone_number: fullPhone,
-              agreed_to_terms: true,
-            }),
+            body: JSON.stringify(archivePayload),
           },
         );
 
@@ -2481,103 +2506,112 @@ export default function ResumeForm() {
 
         if (shouldRegenerateSnapshot) {
           await generateSnapshotForForm(editFormId);
+          await waitForProfileMaterialization();
         }
 
-        navigate(isProfileEditMode ? "/profile" : "/dashboard");
-      } else {
-        // ── NEW MODE: scan cv_archive before inserting ──
-        // First ever form for this user becomes the career profile and gets a snapshot.
-        // Any later form is a document generation form for paid bundles / extra CVs.
-        let isFirstUserForm = true;
+        if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
+        navigate("/profile", { replace: true });
+        return;
+      }
 
-        try {
-          const existingFormsRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/cv_archive?user_id=eq.${userId}&select=form_id&limit=1`,
-            {
-              headers: {
-                apikey: SUPABASE_KEY,
-                Authorization: authHeader,
-              },
+      // ── NEW / RECOVERY MODE ──
+      // If the user has no profiles row yet but already has a career_profile archive row
+      // from a previous failed submit, update that same row instead of creating a duplicate.
+      const profileRows = await readRows<Record<string, any>>(
+        `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${encodeURIComponent(userId)}&select=id,user_id&limit=1`,
+      );
+      const hasProfile = profileRows.length > 0;
+
+      const careerRows = await readRows<Record<string, any>>(
+        `${SUPABASE_URL}/rest/v1/cv_archive?user_id=eq.${encodeURIComponent(userId)}&form_purpose=eq.career_profile&snapshot_enabled=eq.true&select=form_id,submission_id&order=created_at_utc.asc&limit=1`,
+      );
+      const existingCareerArchive = careerRows[0] ?? null;
+
+      if (!hasProfile && existingCareerArchive?.form_id) {
+        const recoveryFilters = `form_id=eq.${encodeURIComponent(existingCareerArchive.form_id)}&user_id=eq.${encodeURIComponent(userId)}`;
+
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/cv_archive?${recoveryFilters}`,
+          {
+            method: "PATCH",
+            headers: {
+              apikey: SUPABASE_KEY,
+              Authorization: authHeader,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
             },
-          );
-
-          if (existingFormsRes.ok) {
-            const existingForms = await existingFormsRes.json().catch(() => []);
-            isFirstUserForm = !(
-              Array.isArray(existingForms) && existingForms.length > 0
-            );
-          }
-        } catch {
-          // If the scan fails, do not accidentally create a second career profile.
-          isFirstUserForm = false;
-        }
-
-        const formPurpose = isFirstUserForm
-          ? "career_profile"
-          : "document_generation";
-        const snapshotEnabled = isFirstUserForm;
-
-        // ── POST: create new cv_archive row ──
-        const submissionId = generateId();
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/cv_archive`, {
-          method: "POST",
-          headers: {
-            apikey: SUPABASE_KEY,
-            Authorization: authHeader,
-            "Content-Type": "application/json",
-            Prefer: "return=representation",
+            body: JSON.stringify({
+              ...archivePayload,
+              agreed_at: new Date().toISOString(),
+              form_purpose: "career_profile",
+              snapshot_enabled: true,
+              generated_for: "self",
+              generated_under_plan: null,
+            }),
           },
-          body: JSON.stringify({
-            ...userColumns,
-            user_id: userId,
-            submission_id: submissionId,
-            cv_data: cvData,
-            cv_full_name_ar: form.fullNameArabic || null,
-            gender: form.gender || null,
-            form_version: "v3",
-            cv_target_job: form.targetJob,
-            cv_first_name: form.fullName.split(" ")[0] || form.fullName,
-            cv_last_name: form.fullName.split(" ").slice(1).join(" ") || "",
-            cv_email: form.cvEmail,
-            phone_number: fullPhone,
-            cv_phone_number: fullPhone,
-            agreed_to_terms: true,
-            agreed_at: new Date().toISOString(),
-            form_purpose: formPurpose,
-            snapshot_enabled: snapshotEnabled,
-            generated_for: isFirstUserForm ? "self" : form.fullName || null,
-            generated_under_plan: null,
-          }),
-        });
-
-        const savedRows = await res.json().catch(() => []);
+        );
 
         if (!res.ok) {
-          const errText = Array.isArray(savedRows)
-            ? ""
-            : JSON.stringify(savedRows);
-          throw new Error(errText || `cv_archive save failed: ${res.status}`);
+          const errText = await res.text();
+          throw new Error(errText || `cv_archive recovery update failed: ${res.status}`);
         }
 
-        const savedRow = Array.isArray(savedRows)
-          ? (savedRows[0] ?? null)
-          : savedRows;
-        const formId = savedRow?.form_id;
+        await generateSnapshotForForm(existingCareerArchive.form_id);
+        await waitForProfileMaterialization();
 
-        if (!formId) {
-          throw new Error("cv_archive saved but form_id was not returned");
-        }
-
-        if (snapshotEnabled) {
-          await generateSnapshotForForm(formId);
-        }
-
-        // Clear draft after successful submit.
-        // Profiles are not manually synced here anymore. cv_archive remains the source of truth;
-        // when snapshot_enabled=true, generate-career-snapshot materializes the Career Profile.
         if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
-        navigate(`/profile`);
+        navigate("/profile", { replace: true });
+        return;
       }
+
+      // If a profile already exists and user somehow opened /build without edit mode,
+      // keep old behavior and create a document_generation row.
+      // If no profile exists and no career archive exists, this is the first career profile.
+      const formPurpose = hasProfile ? "document_generation" : "career_profile";
+      const snapshotEnabled = !hasProfile;
+
+      const submissionId = generateId();
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/cv_archive`, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: authHeader,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          ...archivePayload,
+          submission_id: submissionId,
+          agreed_at: new Date().toISOString(),
+          form_purpose: formPurpose,
+          snapshot_enabled: snapshotEnabled,
+          generated_for: snapshotEnabled ? "self" : form.fullName || null,
+          generated_under_plan: null,
+        }),
+      });
+
+      const savedRows = await res.json().catch(() => []);
+
+      if (!res.ok) {
+        const errText = Array.isArray(savedRows) ? "" : JSON.stringify(savedRows);
+        throw new Error(errText || `cv_archive save failed: ${res.status}`);
+      }
+
+      const savedRow = Array.isArray(savedRows) ? (savedRows[0] ?? null) : savedRows;
+      const formId = savedRow?.form_id;
+
+      if (!formId) {
+        throw new Error("cv_archive saved but form_id was not returned");
+      }
+
+      if (snapshotEnabled) {
+        await generateSnapshotForForm(formId);
+        await waitForProfileMaterialization();
+      }
+
+      if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
+
+      navigate(hasProfile ? "/dashboard" : "/profile", { replace: true });
     } catch (err: any) {
       console.error("Submit error:", err);
       alert(`Save failed: ${err.message}`);
@@ -2585,7 +2619,6 @@ export default function ResumeForm() {
       setSubmitting(false);
     }
   };
-
   // ── Styles ──
   const base =
     "w-full rounded-lg px-4 py-2.5 text-[#F5F0E9] text-sm focus:outline-none transition-colors";
