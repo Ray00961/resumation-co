@@ -222,7 +222,7 @@ const LoginPage = () => {
       handledRef.current = false;
       setProcessing(false);
       toast.error(isRtl ? "انتهت المهلة، حاول مجدداً" : "Timed out. Please try again.");
-    }, 20000);
+    }, 15000);
 
     try {
       const EF_USER_SYNC =
@@ -253,8 +253,6 @@ const LoginPage = () => {
         if (pending) localStorage.removeItem("pending_user_data");
       }
 
-      // Login routing must scan the 3 required layers every time:
-      // users -> cv_archive -> profiles.
       const { data: userData, error: userErr } = await withTimeout(
         supabase
           .from("users")
@@ -267,60 +265,71 @@ const LoginPage = () => {
 
       if (userErr) throw userErr;
 
+      // Existing account rule:
+      // A real returning user must exist in all 3 layers:
+      // users + cv_archive + profiles.
+      // If users exists but career profile is not finished yet, continue to /build.
       if (userData?.username) {
-        const [{ data: archiveRow, error: archiveErr }, { data: profileRow, error: profileErr }] = await Promise.all([
-          withTimeout(
-            supabase
-              .from("cv_archive")
-              .select("user_id, form_id, submission_id, snapshot_enabled, form_purpose")
-              .eq("user_id", uid)
-              .eq("form_purpose", "career_profile")
-              .eq("snapshot_enabled", true)
-              .order("created_at_utc", { ascending: true })
-              .limit(1)
-              .maybeSingle(),
-            10000,
-            "cv_archive lookup",
-          ),
-          withTimeout(
-            supabase
-              .from("profiles")
-              .select("user_id, username, career_form_id, career_submission_id")
-              .eq("user_id", uid)
-              .maybeSingle(),
-            10000,
-            "profiles lookup",
-          ),
-        ]);
+        // ── STEP 1 — find the ORIGINAL career profile cv_archive row ──
+        // Uniquely identified by:
+        //   form_purpose = "career_profile" AND snapshot_enabled = true
+        const { data: archiveRow, error: archiveErr } = await withTimeout(
+          supabase
+            .from("cv_archive")
+            .select("form_id, submission_id")
+            .eq("user_id", uid)
+            .eq("form_purpose", "career_profile")
+            .eq("snapshot_enabled", true)
+            .order("created_at_utc", { ascending: true })
+            .limit(1)
+            .maybeSingle(),
+          10000,
+          "cv_archive lookup",
+        );
 
         if (archiveErr) throw archiveErr;
+
+        // No career profile row yet → user still has to build it.
+        if (!archiveRow?.form_id) {
+          window.location.replace("/build");
+          return;
+        }
+
+        const archiveFormId = archiveRow.form_id as string;
+        const archiveSubmissionId = (archiveRow.submission_id as string) || "";
+
+        // ── STEP 2 — was the profile materialized for THIS career form? ──
+        const { data: profileRow, error: profileErr } = await withTimeout(
+          supabase
+            .from("profiles")
+            .select("user_id, career_form_id")
+            .eq("user_id", uid)
+            .eq("career_form_id", archiveFormId)
+            .maybeSingle(),
+          10000,
+          "profiles lookup",
+        );
+
         if (profileErr) throw profileErr;
 
-        const hasCareerArchive = Boolean(
-          archiveRow?.user_id === uid &&
-          archiveRow?.form_id &&
-          archiveRow?.submission_id &&
-          archiveRow?.snapshot_enabled === true &&
-          archiveRow?.form_purpose === "career_profile",
-        );
-
-        const hasProfile = Boolean(
-          profileRow?.user_id === uid &&
-          profileRow?.username &&
-          profileRow?.career_form_id &&
-          profileRow?.career_submission_id,
-        );
-
-        if (hasCareerArchive && hasProfile) {
+        if (profileRow?.user_id) {
+          // Fully onboarded → go straight to the private profile.
           window.location.replace("/profile");
         } else {
-          window.location.replace("/build");
+          // Crash / connection drop: the career_profile cv_archive row exists
+          // but the profile was never materialized. Re-open the SAME row in
+          // recovery mode so ResumeForm UPDATES it (never inserts a new row)
+          // and re-runs the snapshot until the profile exists.
+          const params = new URLSearchParams({
+            form_id: archiveFormId,
+            submission_id: archiveSubmissionId,
+            mode: "recovery-profile",
+          });
+          window.location.replace(`/build?${params.toString()}`);
         }
         return;
       }
 
-      // No completed users row/username yet: finish username setup first.
-      // LoginPage writes users only; ResumeForm creates cv_archive and profiles later.
       const fullName: string = user.user_metadata?.full_name || "";
       const parts = fullName.trim().split(" ");
 
@@ -331,6 +340,11 @@ const LoginPage = () => {
     } catch (err: any) {
       if (err?.name === "AbortError" || err?.code === 20) {
         if (processingRef.current) clearTimeout(processingRef.current);
+        return;
+      }
+
+      if (String(err?.message || "").includes("lookup timed out")) {
+        window.location.replace("/profile");
         return;
       }
 

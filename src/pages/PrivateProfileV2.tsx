@@ -247,130 +247,6 @@ function pickFreeLanguages(languages: LanguageItem[]): LanguageItem[] {
   ];
 }
 
-
-function normalizeExternalUrl(value: unknown) {
-  const raw = cleanText(value);
-  if (!raw) return "";
-
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (/^\/\//.test(raw)) return `https:${raw}`;
-
-  return `https://${raw}`;
-}
-
-function getLinkHost(urlValue: unknown) {
-  const url = normalizeExternalUrl(urlValue);
-
-  try {
-    return new URL(url).hostname.replace(/^www\./i, "");
-  } catch {
-    return cleanText(urlValue)
-      .replace(/^https?:\/\//i, "")
-      .replace(/^www\./i, "")
-      .split("/")[0];
-  }
-}
-
-function getFaviconUrl(urlValue: unknown) {
-  const host = getLinkHost(urlValue);
-
-  if (!host) return "";
-
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
-}
-
-function inferOtherLinkType(link: OtherLink) {
-  const explicit = cleanText(link.type).toLowerCase();
-  const url = normalizeExternalUrl(link.url).toLowerCase();
-  const host = getLinkHost(link.url).toLowerCase();
-
-  if (explicit.includes("linkedin") || host.includes("linkedin.com")) return "LinkedIn";
-  if (explicit.includes("facebook") || host.includes("facebook.com") || host.includes("fb.com")) return "Facebook";
-  if (explicit.includes("instagram") || host.includes("instagram.com")) return "Instagram";
-  if (explicit.includes("tiktok") || host.includes("tiktok.com")) return "TikTok";
-  if (explicit.includes("github") || host.includes("github.com")) return "GitHub";
-  if (explicit.includes("portfolio")) return "Portfolio";
-  if (explicit.includes("website") || explicit.includes("site")) return "Website";
-
-  if (url) return "Website";
-
-  return cleanText(link.type) || "Link";
-}
-
-function getSocialProfileName(urlValue: unknown) {
-  const url = normalizeExternalUrl(urlValue);
-
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
-    const parts = parsed.pathname
-      .split("/")
-      .map((part) => part.trim())
-      .filter(Boolean);
-
-    if (!parts.length) return parsed.hostname.replace(/^www\./i, "");
-
-    if (host.includes("linkedin.com")) {
-      const inIndex = parts.findIndex((part) =>
-        ["in", "company", "school"].includes(part.toLowerCase()),
-      );
-      const profilePart = parts[inIndex >= 0 ? inIndex + 1 : 0] || parts[0] || "";
-      return decodeURIComponent(profilePart).replace(/[-_]+/g, " ");
-    }
-
-    if (host.includes("tiktok.com")) {
-      return decodeURIComponent(parts[0]).replace(/^@/, "@");
-    }
-
-    if (
-      host.includes("facebook.com") ||
-      host.includes("fb.com") ||
-      host.includes("instagram.com") ||
-      host.includes("github.com")
-    ) {
-      return decodeURIComponent(parts[0]).replace(/^@/, "");
-    }
-
-    return parsed.hostname.replace(/^www\./i, "");
-  } catch {
-    return cleanText(urlValue);
-  }
-}
-
-function getOtherLinkDisplay(link: OtherLink) {
-  const type = inferOtherLinkType(link);
-  const url = normalizeExternalUrl(link.url);
-  const host = getLinkHost(url);
-  const profileName = getSocialProfileName(url);
-
-  if (type === "Website") {
-    return {
-      type,
-      title: host || cleanText(link.type) || "Website",
-      subtitle: url.replace(/^https?:\/\//i, "").replace(/\/$/, ""),
-      imageUrl: getFaviconUrl(url),
-      url,
-    };
-  }
-
-  return {
-    type,
-    title: profileName || cleanText(link.type) || type,
-    subtitle: type,
-    imageUrl: getFaviconUrl(url),
-    url,
-  };
-}
-
-function cleanOtherLinks(links: OtherLink[]) {
-  return links
-    .map((link) => ({
-      type: cleanText(link.type),
-      url: normalizeExternalUrl(link.url),
-    }))
-    .filter((link) => link.url);
-}
-
 function profileFromRow(
   row: any,
   fallback: Partial<ProfileState> = {},
@@ -578,7 +454,6 @@ export default function PrivateProfileV2() {
       noEducation: "No education added yet.",
       noExperience: "No experience added yet.",
       noLinks: "No links added yet.",
-      openLink: "Open link",
       docs: "CVs",
       cls: "Cover Letters",
       analyses: "Analyses",
@@ -652,7 +527,6 @@ export default function PrivateProfileV2() {
       noEducation: "لا يوجد تعليم بعد.",
       noExperience: "لا توجد خبرات بعد.",
       noLinks: "لا توجد روابط بعد.",
-      openLink: "فتح الرابط",
       docs: "السير الذاتية",
       cls: "رسائل التغطية",
       analyses: "التحليلات",
@@ -842,6 +716,40 @@ export default function PrivateProfileV2() {
         const row = Array.isArray(rows) ? (rows[0] ?? null) : null;
 
         if (!row) {
+          // No materialized profile yet. If a career_profile cv_archive row
+          // already exists, this is a crash/connection recovery case: re-open
+          // the SAME row in recovery mode so ResumeForm UPDATES it and re-runs
+          // the snapshot until the profile exists (never creates a new row).
+          // Otherwise the user still has to build the career profile.
+          try {
+            const careerRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/cv_archive?user_id=eq.${encodeURIComponent(uid)}&form_purpose=eq.career_profile&snapshot_enabled=eq.true&select=form_id,submission_id&order=created_at_utc.asc&limit=1`,
+              {
+                headers: {
+                  apikey: SUPABASE_KEY,
+                  Authorization: `Bearer ${session.access_token || SUPABASE_KEY}`,
+                },
+              },
+            );
+            if (careerRes.ok) {
+              const careerRows = await careerRes.json().catch(() => []);
+              const careerRow = Array.isArray(careerRows)
+                ? (careerRows[0] ?? null)
+                : null;
+              if (careerRow?.form_id) {
+                const params = new URLSearchParams({
+                  form_id: careerRow.form_id,
+                  submission_id: careerRow.submission_id || "",
+                  mode: "recovery-profile",
+                });
+                if (!cancelled)
+                  navigate(`/build?${params.toString()}`, { replace: true });
+                return;
+              }
+            }
+          } catch {
+            // fall through to /build
+          }
           if (!cancelled) navigate("/build", { replace: true });
           return;
         }
@@ -1353,7 +1261,6 @@ export default function PrivateProfileV2() {
               promoCode={promo.promoCode}
               promoExpiresAt={promo.promoExpiresAt}
               isFounder={promo.isFounder}
-              variant="compact"
               className="mb-0 bg-[rgba(13,17,23,0.72)]"
             />
           </Card>
@@ -1548,59 +1455,23 @@ export default function PrivateProfileV2() {
         </Card>
 
         <Card title={t.otherLinks}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {cleanOtherLinks(data.other_links).map((link, i) => {
-              const item = getOtherLinkDisplay(link);
-
-              return (
-                <a
-                  key={`${item.type}-${item.url}-${i}`}
-                  href={item.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="group flex items-center gap-3 rounded-2xl p-3 text-sm transition-all hover:-translate-y-0.5"
-                  style={{
-                    background: "rgba(60,80,125,0.06)",
-                    border: "1px solid rgba(60,80,125,0.15)",
-                  }}
-                >
-                  <span
-                    className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0"
-                    style={{
-                      background: "rgba(255,255,255,0.04)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                    }}
-                  >
-                    {item.imageUrl ? (
-                      <img
-                        src={item.imageUrl}
-                        alt=""
-                        className="w-6 h-6 rounded-md"
-                        loading="lazy"
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      <LinkIcon className="w-4 h-4 text-[#E0C58F]" />
-                    )}
-                  </span>
-
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[#F5F0E9] font-bold truncate group-hover:text-[#12B2C1]">
-                      {item.title || item.type}
-                    </span>
-                    <span className="block text-[11px] text-[#7A8FAA] truncate">
-                      {item.subtitle}
-                    </span>
-                  </span>
-
-                  <ExternalLink className="w-4 h-4 text-[#7A8FAA] group-hover:text-[#12B2C1] flex-shrink-0" />
-                </a>
-              );
-            })}
-
-            {!cleanOtherLinks(data.other_links).length && (
+          <div className="space-y-3">
+            {data.other_links.map((l, i) => (
+              <a
+                key={i}
+                href={l.url?.startsWith("http") ? l.url : `https://${l.url}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-xl p-3 text-sm text-[#A8B4CC] hover:text-[#12B2C1]"
+                style={{
+                  background: "rgba(60,80,125,0.06)",
+                  border: "1px solid rgba(60,80,125,0.15)",
+                }}
+              >
+                <LinkIcon className="w-4 h-4" /> {l.type || "link"}
+              </a>
+            ))}
+            {!data.other_links.length && (
               <p className="text-xs text-[#e1ebed] italic">{t.noLinks}</p>
             )}
           </div>
