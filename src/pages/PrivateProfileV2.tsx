@@ -29,6 +29,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "../supabase";
 import { useLang } from "../context/LanguageContext";
+import PromoCodeBanner from "../components/PromoCodeBanner";
 
 type Visibility = "private" | "public";
 
@@ -70,6 +71,8 @@ type ProfileState = {
   profile_email: string;
   cv_email: string;
   phone: string;
+  cv_email_public: boolean;
+  phone_public: boolean;
   gender: string;
   nationality: string;
   location: string;
@@ -131,6 +134,8 @@ const EMPTY: ProfileState = {
   profile_email: "",
   cv_email: "",
   phone: "",
+  cv_email_public: false,
+  phone_public: false,
   gender: "",
   nationality: "",
   location: "",
@@ -189,7 +194,9 @@ function cleanText(value: unknown) {
 
 function isPaidPlan(plan: unknown) {
   const value = cleanText(plan).toLowerCase();
-  return Boolean(value && !["free", "starter", "none", "trial"].includes(value));
+  return Boolean(
+    value && !["free", "starter", "none", "trial"].includes(value),
+  );
 }
 
 function getNestedArray<T = any>(obj: any, paths: string[][]): T[] {
@@ -229,12 +236,21 @@ function pickFreeLanguages(languages: LanguageItem[]): LanguageItem[] {
     });
 
   return [
-    findByNames(["arabic", "عربي", "العربية"]) || { name: "Arabic", level: "—" },
-    findByNames(["english", "انجليزي", "إنجليزي", "الإنجليزية"]) || { name: "English", level: "—" },
+    findByNames(["arabic", "عربي", "العربية"]) || {
+      name: "Arabic",
+      level: "—",
+    },
+    findByNames(["english", "انجليزي", "إنجليزي", "الإنجليزية"]) || {
+      name: "English",
+      level: "—",
+    },
   ];
 }
 
-function profileFromRow(row: any, fallback: Partial<ProfileState> = {}): ProfileState {
+function profileFromRow(
+  row: any,
+  fallback: Partial<ProfileState> = {},
+): ProfileState {
   return {
     ...EMPTY,
     ...fallback,
@@ -242,7 +258,9 @@ function profileFromRow(row: any, fallback: Partial<ProfileState> = {}): Profile
     user_id: cleanText(row?.user_id || fallback.user_id),
     username: cleanText(row?.username || fallback.username),
     career_form_id: cleanText(row?.career_form_id || fallback.career_form_id),
-    career_submission_id: cleanText(row?.career_submission_id || fallback.career_submission_id),
+    career_submission_id: cleanText(
+      row?.career_submission_id || fallback.career_submission_id,
+    ),
 
     first_name: cleanText(row?.first_name || fallback.first_name),
     last_name: cleanText(row?.last_name || fallback.last_name),
@@ -250,6 +268,8 @@ function profileFromRow(row: any, fallback: Partial<ProfileState> = {}): Profile
     profile_email: cleanText(row?.profile_email || fallback.profile_email),
     cv_email: cleanText(row?.cv_email || fallback.cv_email),
     phone: cleanText(row?.phone || fallback.phone),
+    cv_email_public: row?.cv_email_public ?? fallback.cv_email_public ?? false,
+    phone_public: row?.phone_public ?? fallback.phone_public ?? false,
     gender: cleanText(row?.gender || fallback.gender),
     nationality: cleanText(row?.nationality || fallback.nationality),
     location: cleanText(row?.location || fallback.location),
@@ -257,42 +277,93 @@ function profileFromRow(row: any, fallback: Partial<ProfileState> = {}): Profile
     avatar_url: cleanText(row?.avatar_url || fallback.avatar_url),
     cover_url: cleanText(row?.cover_url || fallback.cover_url),
     cover_public: row?.cover_public ?? fallback.cover_public ?? true,
-    avatar_position: cleanText(row?.avatar_position || fallback.avatar_position) || "50% 50%",
-    cover_position: cleanText(row?.cover_position || fallback.cover_position) || "50% 50%",
+    avatar_position:
+      cleanText(row?.avatar_position || fallback.avatar_position) || "50% 50%",
+    cover_position:
+      cleanText(row?.cover_position || fallback.cover_position) || "50% 50%",
 
     headline: cleanText(row?.headline || fallback.headline),
     target_job: cleanText(row?.target_job || fallback.target_job),
     career_level: cleanText(row?.career_level || fallback.career_level),
     ai_summary: cleanText(row?.ai_summary || fallback.ai_summary),
-    ats_score: typeof row?.ats_score === "number" ? row.ats_score : fallback.ats_score ?? null,
+    ats_score:
+      typeof row?.ats_score === "number"
+        ? row.ats_score
+        : (fallback.ats_score ?? null),
 
     career_snapshot: row?.career_snapshot ?? fallback.career_snapshot ?? null,
-    snapshot_strengths: arr<string>(row?.snapshot_strengths || fallback.snapshot_strengths).map(cleanText).filter(Boolean),
-    snapshot_improvements: arr<string>(row?.snapshot_improvements || fallback.snapshot_improvements).map(cleanText).filter(Boolean),
-    snapshot_generated_at: cleanText(row?.snapshot_generated_at || fallback.snapshot_generated_at),
+    snapshot_strengths: arr<string>(
+      row?.snapshot_strengths || fallback.snapshot_strengths,
+    )
+      .map(cleanText)
+      .filter(Boolean),
+    snapshot_improvements: arr<string>(
+      row?.snapshot_improvements || fallback.snapshot_improvements,
+    )
+      .map(cleanText)
+      .filter(Boolean),
+    snapshot_generated_at: cleanText(
+      row?.snapshot_generated_at || fallback.snapshot_generated_at,
+    ),
 
-    skills: arr<string>(row?.skills || fallback.skills).map(cleanText).filter(Boolean),
+    skills: arr<string>(row?.skills || fallback.skills)
+      .map(cleanText)
+      .filter(Boolean),
     education: arr<EduItem>(row?.education || fallback.education),
     experience: arr<ExpItem>(row?.experience || fallback.experience),
     other_links: arr<OtherLink>(row?.other_links || fallback.other_links),
-    languages: extractLanguages(row).length ? extractLanguages(row) : arr<LanguageItem>(fallback.languages),
+    languages: extractLanguages(row).length
+      ? extractLanguages(row)
+      : arr<LanguageItem>(fallback.languages),
 
-    profile_visibility: row?.profile_visibility === "public" ? "public" : fallback.profile_visibility || "private",
-    public_profile_enabled: row?.public_profile_enabled ?? fallback.public_profile_enabled ?? false,
-    profile_locked_experience: row?.profile_locked_experience ?? fallback.profile_locked_experience ?? true,
+    profile_visibility:
+      row?.profile_visibility === "public"
+        ? "public"
+        : fallback.profile_visibility || "private",
+    public_profile_enabled:
+      row?.public_profile_enabled ?? fallback.public_profile_enabled ?? false,
+    profile_locked_experience:
+      row?.profile_locked_experience ??
+      fallback.profile_locked_experience ??
+      true,
     qr_enabled: row?.qr_enabled ?? fallback.qr_enabled ?? false,
     qr_public_url: cleanText(row?.qr_public_url || fallback.qr_public_url),
 
     active_plan: cleanText(row?.active_plan || fallback.active_plan),
-    plan_unlocked_at: cleanText(row?.plan_unlocked_at || fallback.plan_unlocked_at),
-    documents_generated_count: Number(row?.documents_generated_count ?? fallback.documents_generated_count ?? 0),
-    cover_letters_generated_count: Number(row?.cover_letters_generated_count ?? fallback.cover_letters_generated_count ?? 0),
-    analyses_used_count: Number(row?.analyses_used_count ?? fallback.analyses_used_count ?? 0),
+    plan_unlocked_at: cleanText(
+      row?.plan_unlocked_at || fallback.plan_unlocked_at,
+    ),
+    documents_generated_count: Number(
+      row?.documents_generated_count ?? fallback.documents_generated_count ?? 0,
+    ),
+    cover_letters_generated_count: Number(
+      row?.cover_letters_generated_count ??
+        fallback.cover_letters_generated_count ??
+        0,
+    ),
+    analyses_used_count: Number(
+      row?.analyses_used_count ?? fallback.analyses_used_count ?? 0,
+    ),
 
-    profile_ai_assistant_enabled: row?.profile_ai_assistant_enabled ?? fallback.profile_ai_assistant_enabled ?? false,
-    profile_summary_rewrite_cost: Number(row?.profile_summary_rewrite_cost ?? fallback.profile_summary_rewrite_cost ?? 10),
-    profile_experience_ai_cost: Number(row?.profile_experience_ai_cost ?? fallback.profile_experience_ai_cost ?? 20),
-    profile_experience_edit_cost: Number(row?.profile_experience_edit_cost ?? fallback.profile_experience_edit_cost ?? 10),
+    profile_ai_assistant_enabled:
+      row?.profile_ai_assistant_enabled ??
+      fallback.profile_ai_assistant_enabled ??
+      false,
+    profile_summary_rewrite_cost: Number(
+      row?.profile_summary_rewrite_cost ??
+        fallback.profile_summary_rewrite_cost ??
+        10,
+    ),
+    profile_experience_ai_cost: Number(
+      row?.profile_experience_ai_cost ??
+        fallback.profile_experience_ai_cost ??
+        20,
+    ),
+    profile_experience_edit_cost: Number(
+      row?.profile_experience_edit_cost ??
+        fallback.profile_experience_edit_cost ??
+        10,
+    ),
 
     created_at: cleanText(row?.created_at || fallback.created_at),
     updated_at: cleanText(row?.updated_at || fallback.updated_at),
@@ -309,6 +380,11 @@ export default function PrivateProfileV2() {
   const [saving, setSaving] = useState(false);
   const [photoEditMode, setPhotoEditMode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [promo, setPromo] = useState({
+    promoCode: "",
+    promoExpiresAt: "",
+    isFounder: false,
+  });
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -343,8 +419,15 @@ export default function PrivateProfileV2() {
       publicLink: "Public Profile Link",
       usernameLabel: "Username",
       qrStatus: "QR Status",
-      formId: "Career Form ID",
-      submissionId: "Submission ID",
+      accountEmail: "Account Email",
+      accountEmailPrivate:
+        "Locked private. This email is never shown publicly.",
+      cvEmail: "CV Email",
+      phoneVisibility: "Phone Visibility",
+      publicOnPaid: "Public on paid profile",
+      privateLockedFree: "Private on free plan",
+      visibilitySaved: "Visibility saved",
+      referralRewards: "Referral Rewards",
       professionalSummary: "Professional Summary",
       careerSnapshot: "Career Snapshot",
       careerLevel: "Career Level",
@@ -362,7 +445,8 @@ export default function PrivateProfileV2() {
       experience: "Experience",
       otherLinks: "Other Links",
       publicPreview: "Free public profile preview",
-      publicPreviewText: "Free public visitors see name, target job, summary, career level, top 3 skills, Arabic/English language levels, and latest education only. Paid profiles can unlock the full public profile.",
+      publicPreviewText:
+        "Free public visitors see name, target job, summary, career level, top 3 skills, Arabic/English language levels, and latest education only. Paid profiles can unlock the full public profile.",
       languages: "Languages",
       latestEducation: "Latest Education",
       noSummary: "No summary yet. Complete your career profile first.",
@@ -408,8 +492,15 @@ export default function PrivateProfileV2() {
       publicLink: "رابط الملف العام",
       usernameLabel: "اسم المستخدم",
       qrStatus: "حالة QR",
-      formId: "رقم فورم الملف المهني",
-      submissionId: "رقم الإرسال",
+      accountEmail: "بريد الحساب",
+      accountEmailPrivate:
+        "خاص ومقفول. هذا البريد لا يظهر في الملف العام أبداً.",
+      cvEmail: "بريد السيرة الذاتية",
+      phoneVisibility: "ظهور الهاتف",
+      publicOnPaid: "عام على الخطة المدفوعة",
+      privateLockedFree: "خاص على الخطة المجانية",
+      visibilitySaved: "تم حفظ الظهور",
+      referralRewards: "مكافآت الإحالة",
       professionalSummary: "الملخص المهني",
       careerSnapshot: "التحليل المهني السريع",
       careerLevel: "المستوى المهني",
@@ -427,7 +518,8 @@ export default function PrivateProfileV2() {
       experience: "الخبرات",
       otherLinks: "روابط أخرى",
       publicPreview: "معاينة الملف العام المجاني",
-      publicPreviewText: "الزائر العام المجاني يرى الاسم، الوظيفة المستهدفة، الملخص، المستوى المهني، أهم 3 مهارات، مستوى العربية والإنجليزية، وآخر دراسة فقط. الملفات المدفوعة يمكنها فتح الملف العام الكامل.",
+      publicPreviewText:
+        "الزائر العام المجاني يرى الاسم، الوظيفة المستهدفة، الملخص، المستوى المهني، أهم 3 مهارات، مستوى العربية والإنجليزية، وآخر دراسة فقط. الملفات المدفوعة يمكنها فتح الملف العام الكامل.",
       languages: "اللغات",
       latestEducation: "آخر دراسة",
       noSummary: "لا يوجد ملخص بعد. أكمل ملفك المهني أولاً.",
@@ -455,17 +547,29 @@ export default function PrivateProfileV2() {
   }[lang];
 
   const isPaid = isPaidPlan(data.active_plan);
-  const fullName = [data.first_name, data.last_name].filter(Boolean).join(" ") || data.full_name_ar || "—";
-  const initials = [data.first_name?.[0], data.last_name?.[0]].filter(Boolean).join("").toUpperCase() || "?";
+  const fullName =
+    [data.first_name, data.last_name].filter(Boolean).join(" ") ||
+    data.full_name_ar ||
+    "—";
+  const initials =
+    [data.first_name?.[0], data.last_name?.[0]]
+      .filter(Boolean)
+      .join("")
+      .toUpperCase() || "?";
   const publicSkills = isPaid ? data.skills : data.skills.slice(0, 3);
-  const publicLanguages = isPaid ? data.languages : pickFreeLanguages(data.languages);
+  const publicLanguages = isPaid
+    ? data.languages
+    : pickFreeLanguages(data.languages);
   const latestEdu = data.education[0] || null;
-  const publicProfileUrl = data.username ? `https://resumation.co/u/${data.username}` : "";
+  const publicProfileUrl = data.username
+    ? `https://resumation.co/u/${data.username}`
+    : "";
 
   const goToCareerForm = () => {
     const params = new URLSearchParams({ mode: "edit-profile" });
     if (data.career_form_id) params.set("form_id", data.career_form_id);
-    if (data.career_submission_id) params.set("submission_id", data.career_submission_id);
+    if (data.career_submission_id)
+      params.set("submission_id", data.career_submission_id);
     navigate(`/build?${params.toString()}`);
   };
 
@@ -474,23 +578,42 @@ export default function PrivateProfileV2() {
     return { x: Number.isFinite(x) ? x : 50, y: Number.isFinite(y) ? y : 50 };
   };
 
-  const startDrag = (e: React.MouseEvent | React.TouchEvent, field: "cover_position" | "avatar_position") => {
+  const startDrag = (
+    e: React.MouseEvent | React.TouchEvent,
+    field: "cover_position" | "avatar_position",
+  ) => {
     if (!photoEditMode) return;
     e.preventDefault();
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
     const pos = parsePos(data[field]);
-    dragRef.current = { active: true, field, startX: clientX, startY: clientY, startPosX: pos.x, startPosY: pos.y };
+    dragRef.current = {
+      active: true,
+      field,
+      startX: clientX,
+      startY: clientY,
+      startPosX: pos.x,
+      startPosY: pos.y,
+    };
 
     const onMove = (ev: MouseEvent | TouchEvent) => {
       if (!dragRef.current?.active) return;
-      const cx = "touches" in ev ? (ev as TouchEvent).touches[0].clientX : (ev as MouseEvent).clientX;
-      const cy = "touches" in ev ? (ev as TouchEvent).touches[0].clientY : (ev as MouseEvent).clientY;
+      const cx =
+        "touches" in ev
+          ? (ev as TouchEvent).touches[0].clientX
+          : (ev as MouseEvent).clientX;
+      const cy =
+        "touches" in ev
+          ? (ev as TouchEvent).touches[0].clientY
+          : (ev as MouseEvent).clientY;
       const dx = ((cx - dragRef.current.startX) / window.innerWidth) * -120;
       const dy = ((cy - dragRef.current.startY) / window.innerHeight) * -120;
       const nx = Math.min(100, Math.max(0, dragRef.current.startPosX + dx));
       const ny = Math.min(100, Math.max(0, dragRef.current.startPosY + dy));
-      setData((d) => ({ ...d, [dragRef.current!.field]: `${nx.toFixed(1)}% ${ny.toFixed(1)}%` }));
+      setData((d) => ({
+        ...d,
+        [dragRef.current!.field]: `${nx.toFixed(1)}% ${ny.toFixed(1)}%`,
+      }));
     };
 
     const onEnd = () => {
@@ -590,7 +713,7 @@ export default function PrivateProfileV2() {
         if (!res.ok) throw new Error(await res.text());
 
         const rows = await res.json();
-        const row = Array.isArray(rows) ? rows[0] ?? null : null;
+        const row = Array.isArray(rows) ? (rows[0] ?? null) : null;
 
         if (!row) {
           if (!cancelled) navigate("/build", { replace: true });
@@ -598,6 +721,43 @@ export default function PrivateProfileV2() {
         }
 
         if (!cancelled) setData(profileFromRow(row, fallback));
+
+        try {
+          const userRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(uid)}&select=*&limit=1`,
+            {
+              headers: {
+                apikey: SUPABASE_KEY,
+                Authorization: `Bearer ${session.access_token || SUPABASE_KEY}`,
+              },
+            },
+          );
+          if (userRes.ok) {
+            const userRows = await userRes.json();
+            const userRow = Array.isArray(userRows)
+              ? (userRows[0] ?? null)
+              : null;
+            const promoCode = cleanText(
+              userRow?.promo_code ||
+                userRow?.referral_code ||
+                userRow?.founder_code,
+            );
+            const promoExpiresAt = cleanText(
+              userRow?.promo_expires_at ||
+                userRow?.referral_expires_at ||
+                userRow?.founder_code_expires_at,
+            );
+            const isFounder = Boolean(
+              userRow?.is_founder ||
+              userRow?.founder ||
+              userRow?.founder_member,
+            );
+            if (!cancelled && promoCode && promoExpiresAt)
+              setPromo({ promoCode, promoExpiresAt, isFounder });
+          }
+        } catch (promoErr) {
+          console.warn("Promo code load skipped", promoErr);
+        }
       } catch (err) {
         console.error("PrivateProfileV2 load error", err);
         if (!cancelled) toast.error(t.error);
@@ -622,7 +782,30 @@ export default function PrivateProfileV2() {
     if (error) throw error;
   };
 
-  const uploadPhoto = async (file: File, bucket: "avatars" | "covers", field: "avatar_url" | "cover_url") => {
+  const updateContactVisibility = async (
+    field: "cv_email_public" | "phone_public",
+    value: boolean,
+  ) => {
+    if (!isPaid) return;
+    try {
+      setSaving(true);
+      setData((d) => ({ ...d, [field]: value }));
+      await savePartial({ [field]: value });
+      toast.success(t.visibilitySaved);
+    } catch (err) {
+      console.error("visibility update failed", err);
+      toast.error(t.error);
+      setData((d) => ({ ...d, [field]: !value }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const uploadPhoto = async (
+    file: File,
+    bucket: "avatars" | "covers",
+    field: "avatar_url" | "cover_url",
+  ) => {
     if (!userId) return toast.error("Not logged in");
     try {
       if (!file.type.startsWith("image/")) {
@@ -630,7 +813,9 @@ export default function PrivateProfileV2() {
         return;
       }
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-      const safeExt = ["jpg", "jpeg", "png", "webp"].includes(ext) ? ext : "jpg";
+      const safeExt = ["jpg", "jpeg", "png", "webp"].includes(ext)
+        ? ext
+        : "jpg";
       const name = bucket === "avatars" ? "avatar" : "cover";
       const path = `${userId}/${name}-${Date.now()}.${safeExt}`;
 
@@ -640,7 +825,9 @@ export default function PrivateProfileV2() {
       });
       if (error) throw error;
 
-      const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(path);
+      const { data: publicData } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(path);
       const publicUrl = publicData.publicUrl;
       setData((d) => ({ ...d, [field]: publicUrl }));
       await savePartial({ [field]: publicUrl });
@@ -681,7 +868,8 @@ export default function PrivateProfileV2() {
   };
 
   const copyQrLink = () => {
-    const url = data.qr_public_url || `https://resumation.co/u/${data.username}`;
+    const url =
+      data.qr_public_url || `https://resumation.co/u/${data.username}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
@@ -699,7 +887,11 @@ export default function PrivateProfileV2() {
     <div
       className="min-h-screen bg-[#0D1117] text-[#D9CBC2]"
       dir={isRtl ? "rtl" : "ltr"}
-      style={{ fontFamily: isRtl ? "'Tajawal', sans-serif" : "'Plus Jakarta Sans', sans-serif" }}
+      style={{
+        fontFamily: isRtl
+          ? "'Tajawal', sans-serif"
+          : "'Plus Jakarta Sans', sans-serif",
+      }}
     >
       <style>{`
         .btn-muted { display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.375rem 0.75rem; border-radius: 0.5rem; font-size: 12px; font-weight: 500; color: #A8B4CC; background: rgba(60,80,125,0.06); border: 1px solid rgba(60,80,125,0.15); transition: color 150ms ease, border-color 150ms ease, background 150ms ease; }
@@ -713,14 +905,20 @@ export default function PrivateProfileV2() {
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0], "avatars", "avatar_url")}
+        onChange={(e) =>
+          e.target.files?.[0] &&
+          uploadPhoto(e.target.files[0], "avatars", "avatar_url")
+        }
       />
       <input
         ref={coverInputRef}
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0], "covers", "cover_url")}
+        onChange={(e) =>
+          e.target.files?.[0] &&
+          uploadPhoto(e.target.files[0], "covers", "cover_url")
+        }
       />
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
@@ -733,16 +931,38 @@ export default function PrivateProfileV2() {
           <div
             className="h-28 sm:h-36 w-full rounded-t-2xl relative overflow-hidden select-none"
             style={{
-              background: data.cover_url ? undefined : "linear-gradient(135deg, #0D1826 0%, #112250 55%, #0A1628 100%)",
+              background: data.cover_url
+                ? undefined
+                : "linear-gradient(135deg, #0D1826 0%, #112250 55%, #0A1628 100%)",
               cursor: photoEditMode && data.cover_url ? "grab" : "default",
             }}
-            onMouseDown={photoEditMode && data.cover_url ? (e) => startDrag(e, "cover_position") : undefined}
-            onTouchStart={photoEditMode && data.cover_url ? (e) => startDrag(e, "cover_position") : undefined}
+            onMouseDown={
+              photoEditMode && data.cover_url
+                ? (e) => startDrag(e, "cover_position")
+                : undefined
+            }
+            onTouchStart={
+              photoEditMode && data.cover_url
+                ? (e) => startDrag(e, "cover_position")
+                : undefined
+            }
           >
             {data.cover_url ? (
-              <img src={data.cover_url} alt="cover" draggable={false} className="w-full h-full object-cover pointer-events-none" style={{ objectPosition: data.cover_position }} />
+              <img
+                src={data.cover_url}
+                alt="cover"
+                draggable={false}
+                className="w-full h-full object-cover pointer-events-none"
+                style={{ objectPosition: data.cover_position }}
+              />
             ) : (
-              <div className="absolute inset-0" style={{ backgroundImage: "radial-gradient(circle at 25% 60%, rgba(18,178,193,0.18) 0%, transparent 55%), radial-gradient(circle at 80% 25%, rgba(224,197,143,0.1) 0%, transparent 50%)" }} />
+              <div
+                className="absolute inset-0"
+                style={{
+                  backgroundImage:
+                    "radial-gradient(circle at 25% 60%, rgba(18,178,193,0.18) 0%, transparent 55%), radial-gradient(circle at 80% 25%, rgba(224,197,143,0.1) 0%, transparent 50%)",
+                }}
+              />
             )}
             {photoEditMode && (
               <button
@@ -751,7 +971,10 @@ export default function PrivateProfileV2() {
                   coverInputRef.current?.click();
                 }}
                 className="absolute top-2 right-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-white hover:bg-black/70 transition-colors"
-                style={{ background: "rgba(0,0,0,0.50)", backdropFilter: "blur(6px)" }}
+                style={{
+                  background: "rgba(0,0,0,0.50)",
+                  backdropFilter: "blur(6px)",
+                }}
               >
                 <Camera className="w-3.5 h-3.5" /> {t.changeCover}
               </button>
@@ -762,9 +985,19 @@ export default function PrivateProfileV2() {
             <div className="flex items-end justify-between -mt-10 mb-4 flex-wrap gap-3">
               <div
                 className="relative select-none"
-                style={{ cursor: photoEditMode && data.avatar_url ? "grab" : "default" }}
-                onMouseDown={photoEditMode && data.avatar_url ? (e) => startDrag(e, "avatar_position") : undefined}
-                onTouchStart={photoEditMode && data.avatar_url ? (e) => startDrag(e, "avatar_position") : undefined}
+                style={{
+                  cursor: photoEditMode && data.avatar_url ? "grab" : "default",
+                }}
+                onMouseDown={
+                  photoEditMode && data.avatar_url
+                    ? (e) => startDrag(e, "avatar_position")
+                    : undefined
+                }
+                onTouchStart={
+                  photoEditMode && data.avatar_url
+                    ? (e) => startDrag(e, "avatar_position")
+                    : undefined
+                }
               >
                 {data.avatar_url ? (
                   <img
@@ -772,10 +1005,21 @@ export default function PrivateProfileV2() {
                     alt={fullName}
                     draggable={false}
                     className="w-20 h-20 rounded-2xl object-cover pointer-events-none"
-                    style={{ border: "3px solid #0D1117", boxShadow: "0 0 0 1px rgba(18,178,193,0.3)", objectPosition: data.avatar_position }}
+                    style={{
+                      border: "3px solid #0D1117",
+                      boxShadow: "0 0 0 1px rgba(18,178,193,0.3)",
+                      objectPosition: data.avatar_position,
+                    }}
                   />
                 ) : (
-                  <div className="w-20 h-20 rounded-2xl flex items-center justify-center text-xl font-black text-[#F5F0E9]" style={{ background: "linear-gradient(135deg,#112250,#162A60)", border: "3px solid #0D1117", boxShadow: "0 0 0 1px rgba(18,178,193,0.3)" }}>
+                  <div
+                    className="w-20 h-20 rounded-2xl flex items-center justify-center text-xl font-black text-[#F5F0E9]"
+                    style={{
+                      background: "linear-gradient(135deg,#112250,#162A60)",
+                      border: "3px solid #0D1117",
+                      boxShadow: "0 0 0 1px rgba(18,178,193,0.3)",
+                    }}
+                  >
                     {initials}
                   </div>
                 )}
@@ -796,11 +1040,22 @@ export default function PrivateProfileV2() {
               <div className="flex items-center gap-2 flex-wrap">
                 {!photoEditMode && data.username && (
                   <>
-                    <button onClick={copyPublicLink} className="btn-muted" style={{ color: copied ? "#34d399" : "#A8B4CC" }}>
-                      {copied ? <CheckCheck className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    <button
+                      onClick={copyPublicLink}
+                      className="btn-muted"
+                      style={{ color: copied ? "#34d399" : "#A8B4CC" }}
+                    >
+                      {copied ? (
+                        <CheckCheck className="w-3 h-3" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
                       {copied ? t.copied : t.copy}
                     </button>
-                    <button onClick={() => navigate(`/u/${data.username}`)} className="btn-cyan">
+                    <button
+                      onClick={() => navigate(`/u/${data.username}`)}
+                      className="btn-cyan"
+                    >
                       <ExternalLink className="w-3 h-3" /> {t.viewPublic}
                     </button>
                   </>
@@ -810,21 +1065,38 @@ export default function PrivateProfileV2() {
                     <Link to="/account" className="btn-muted">
                       <UserCog className="w-3 h-3" /> {t.myAccount}
                     </Link>
-                    <button onClick={() => setPhotoEditMode(true)} className="btn-muted">
+                    <button
+                      onClick={() => setPhotoEditMode(true)}
+                      className="btn-muted"
+                    >
                       <Camera className="w-3 h-3" /> {t.customizePhotos}
                     </button>
-                    <button onClick={goToCareerForm} className="btn-muted font-semibold">
+                    <button
+                      onClick={goToCareerForm}
+                      className="btn-muted font-semibold"
+                    >
                       <Edit3 className="w-3 h-3" /> {t.editCareerForm}
                     </button>
                   </>
                 )}
                 {photoEditMode && (
                   <div className="flex gap-2">
-                    <button onClick={() => setPhotoEditMode(false)} className="btn-muted">
+                    <button
+                      onClick={() => setPhotoEditMode(false)}
+                      className="btn-muted"
+                    >
                       <X className="w-3 h-3" /> {t.cancel}
                     </button>
-                    <button onClick={handleSavePhotos} disabled={saving} className="btn-primary disabled:opacity-60">
-                      {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                    <button
+                      onClick={handleSavePhotos}
+                      disabled={saving}
+                      className="btn-primary disabled:opacity-60"
+                    >
+                      {saving ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Save className="w-3 h-3" />
+                      )}
                       {saving ? "..." : t.savePhotos}
                     </button>
                   </div>
@@ -832,18 +1104,36 @@ export default function PrivateProfileV2() {
               </div>
             </div>
 
-            <h1 className="text-xl font-bold text-[#F5F0E9] mb-1">{fullName}</h1>
+            <h1 className="text-xl font-bold text-[#F5F0E9] mb-1">
+              {fullName}
+            </h1>
             <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <span className="text-sm text-[#e1ebed] font-mono">@{data.username || "—"}</span>
+              <span className="text-sm text-[#e1ebed] font-mono">
+                @{data.username || "—"}
+              </span>
               <Badge>{t.member}</Badge>
-              {data.profile_visibility === "public" ? <Badge tone="green">{t.public}</Badge> : <Badge tone="muted">{t.private}</Badge>}
+              {data.profile_visibility === "public" ? (
+                <Badge tone="green">{t.public}</Badge>
+              ) : (
+                <Badge tone="muted">{t.private}</Badge>
+              )}
             </div>
-            {data.headline && <p className="text-sm text-[#A8B4CC] mb-2">{data.headline}</p>}
+            {data.headline && (
+              <p className="text-sm text-[#A8B4CC] mb-2">{data.headline}</p>
+            )}
 
             <div className="flex flex-wrap gap-4 text-xs text-[#e1ebed] mt-3">
               {data.location && <Meta icon={MapPin}>{data.location}</Meta>}
-              {data.career_level && <Meta icon={ShieldCheck}>{data.career_level}</Meta>}
-              {isPaid ? <Meta icon={Crown} className="text-[#E0C58F]">{data.active_plan}</Meta> : <Meta icon={Lock}>{t.noPlan}</Meta>}
+              {data.career_level && (
+                <Meta icon={ShieldCheck}>{data.career_level}</Meta>
+              )}
+              {isPaid ? (
+                <Meta icon={Crown} className="text-[#E0C58F]">
+                  {data.active_plan}
+                </Meta>
+              ) : (
+                <Meta icon={Lock}>{t.noPlan}</Meta>
+              )}
             </div>
           </div>
         </Card>
@@ -851,76 +1141,214 @@ export default function PrivateProfileV2() {
         <Card title={t.identity}>
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <InfoText label={t.usernameLabel} value={data.username ? `@${data.username}` : "—"} />
-              <InfoText label={t.publicLink} value={publicProfileUrl ? publicProfileUrl.replace("https://", "") : "—"} />
+              <InfoText
+                label={t.usernameLabel}
+                value={data.username ? `@${data.username}` : "—"}
+              />
+              <InfoText
+                label={t.publicLink}
+                value={
+                  publicProfileUrl
+                    ? publicProfileUrl.replace("https://", "")
+                    : "—"
+                }
+              />
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button onClick={copyPublicLink} disabled={!data.username} className="btn-muted disabled:opacity-50 disabled:cursor-not-allowed" style={{ color: copied ? "#34d399" : "#A8B4CC" }}>
-                {copied ? <CheckCheck className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+              <button
+                onClick={copyPublicLink}
+                disabled={!data.username}
+                className="btn-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ color: copied ? "#34d399" : "#A8B4CC" }}
+              >
+                {copied ? (
+                  <CheckCheck className="w-3 h-3" />
+                ) : (
+                  <Copy className="w-3 h-3" />
+                )}
                 {copied ? t.copied : t.copy}
               </button>
-              <button onClick={() => data.username && navigate(`/u/${data.username}`)} disabled={!data.username} className="btn-cyan disabled:opacity-50 disabled:cursor-not-allowed">
+              <button
+                onClick={() => data.username && navigate(`/u/${data.username}`)}
+                disabled={!data.username}
+                className="btn-cyan disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 <ExternalLink className="w-3 h-3" /> {t.viewPublic}
               </button>
             </div>
 
-            <div className="rounded-xl p-4 flex items-start gap-4" style={{ background: "rgba(60,80,125,0.05)", border: "1px solid rgba(60,80,125,0.14)" }}>
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "rgba(18,178,193,0.07)", border: "1px solid rgba(18,178,193,0.15)" }}>
+            <div
+              className="rounded-xl p-4 flex items-start gap-4"
+              style={{
+                background: "rgba(60,80,125,0.05)",
+                border: "1px solid rgba(60,80,125,0.14)",
+              }}
+            >
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{
+                  background: "rgba(18,178,193,0.07)",
+                  border: "1px solid rgba(18,178,193,0.15)",
+                }}
+              >
                 <QrCode className="w-5 h-5 text-[#12B2C1]" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-[#E0C58F] uppercase tracking-widest mb-1">{t.qrStatus}</p>
+                <p className="text-[10px] text-[#E0C58F] uppercase tracking-widest mb-1">
+                  {t.qrStatus}
+                </p>
                 {!isPaid ? (
-                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrLocked}</p>
+                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">
+                    {t.qrLocked}
+                  </p>
                 ) : data.qr_enabled && data.qr_public_url ? (
                   <>
-                    <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrReady}</p>
-                    <button onClick={copyQrLink} className="btn-muted mt-3"><Copy className="w-3 h-3" /> {copied ? t.copied : t.copy}</button>
+                    <p className="text-sm text-[#A8B4CC] leading-[1.8]">
+                      {t.qrReady}
+                    </p>
+                    <button onClick={copyQrLink} className="btn-muted mt-3">
+                      <Copy className="w-3 h-3" /> {copied ? t.copied : t.copy}
+                    </button>
                   </>
                 ) : (
-                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">{t.qrSoon}</p>
+                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">
+                    {t.qrSoon}
+                  </p>
                 )}
               </div>
             </div>
           </div>
         </Card>
 
+        {promo.promoCode && promo.promoExpiresAt && (
+          <Card title={t.referralRewards}>
+            <PromoCodeBanner
+              promoCode={promo.promoCode}
+              promoExpiresAt={promo.promoExpiresAt}
+              isFounder={promo.isFounder}
+              className="mb-0 bg-[rgba(13,17,23,0.72)]"
+            />
+          </Card>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatCard icon={ShieldCheck} label={t.careerLevel} value={data.career_level || "—"} color="#12B2C1" />
-          <StatCard icon={BrainCircuit} label={t.atsScore} value={data.ats_score === null ? "—" : `${data.ats_score}/100`} color="#E0C58F" />
-          <StatCard icon={Sparkles} label={t.generatedAt} value={data.snapshot_generated_at ? new Date(data.snapshot_generated_at).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-US") : "—"} color="#A8B4CC" />
+          <StatCard
+            icon={ShieldCheck}
+            label={t.careerLevel}
+            value={data.career_level || "—"}
+            color="#12B2C1"
+          />
+          <StatCard
+            icon={BrainCircuit}
+            label={t.atsScore}
+            value={data.ats_score === null ? "—" : `${data.ats_score}/100`}
+            color="#E0C58F"
+          />
+          <StatCard
+            icon={Sparkles}
+            label={t.generatedAt}
+            value={
+              data.snapshot_generated_at
+                ? new Date(data.snapshot_generated_at).toLocaleDateString(
+                    lang === "ar" ? "ar-EG" : "en-US",
+                  )
+                : "—"
+            }
+            color="#A8B4CC"
+          />
         </div>
 
         <Card title={t.professionalSummary}>
-          <p className="text-sm text-[#A8B4CC] leading-[1.9]">{data.ai_summary || <span className="italic text-[#e1ebed]">{t.noSummary}</span>}</p>
+          <p className="text-sm text-[#A8B4CC] leading-[1.9]">
+            {data.ai_summary || (
+              <span className="italic text-[#e1ebed]">{t.noSummary}</span>
+            )}
+          </p>
           <div className="mt-3 text-[11px] text-[#e1ebed] flex flex-wrap gap-2">
             <Badge tone="muted">{t.aiCoins}</Badge>
-            <Badge tone="muted">{t.summaryCost}: {data.profile_summary_rewrite_cost}</Badge>
+            <Badge tone="muted">
+              {t.summaryCost}: {data.profile_summary_rewrite_cost}
+            </Badge>
           </div>
           <InlineEditButton onClick={goToCareerForm} label={t.editCareerForm} />
         </Card>
 
         <Card title={t.careerSnapshot}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <MiniList title={t.strengths} items={data.snapshot_strengths} tone="good" />
-            <MiniList title={t.improvements} items={data.snapshot_improvements} tone="warn" />
+            <MiniList
+              title={t.strengths}
+              items={data.snapshot_strengths}
+              tone="good"
+            />
+            <MiniList
+              title={t.improvements}
+              items={data.snapshot_improvements}
+              tone="warn"
+            />
           </div>
         </Card>
 
         <Card title={t.targetJob}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <InfoRow icon={Briefcase} label={t.targetJob} value={data.target_job || "—"} />
-            <InfoRow icon={MapPin} label={t.location} value={data.location || "—"} />
+            <InfoRow
+              icon={Briefcase}
+              label={t.targetJob}
+              value={data.target_job || "—"}
+            />
+            <InfoRow
+              icon={MapPin}
+              label={t.location}
+              value={data.location || "—"}
+            />
           </div>
           <InlineEditButton onClick={goToCareerForm} label={t.editCareerForm} />
         </Card>
 
         <Card title={t.email}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <InfoRow icon={Mail} label={t.email} value={data.profile_email || data.cv_email || "—"} />
-            <InfoRow icon={Phone} label={t.phone} value={data.phone || "—"} />
+          <div className="space-y-3">
+            <div
+              className="rounded-xl p-4"
+              style={{
+                background: "rgba(60,80,125,0.05)",
+                border: "1px solid rgba(60,80,125,0.14)",
+              }}
+            >
+              <InfoRow
+                icon={Lock}
+                label={t.accountEmail}
+                value={data.profile_email || "—"}
+              />
+              <p className="text-[11px] text-[#7A8FAA] mt-2 leading-relaxed">
+                {t.accountEmailPrivate}
+              </p>
+            </div>
+
+            <ContactVisibilityRow
+              icon={Mail}
+              label={t.cvEmail}
+              value={data.cv_email || "—"}
+              enabled={data.cv_email_public}
+              locked={!isPaid}
+              lockedText={t.privateLockedFree}
+              publicText={t.publicOnPaid}
+              onToggle={(next) =>
+                updateContactVisibility("cv_email_public", next)
+              }
+            />
+
+            <ContactVisibilityRow
+              icon={Phone}
+              label={t.phone}
+              value={data.phone || "—"}
+              enabled={data.phone_public}
+              locked={!isPaid}
+              lockedText={t.privateLockedFree}
+              publicText={t.publicOnPaid}
+              onToggle={(next) => updateContactVisibility("phone_public", next)}
+            />
           </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
             <InfoText label={t.nationality} value={data.nationality || "—"} />
             <InfoText label={t.gender} value={data.gender || "—"} />
@@ -931,8 +1359,15 @@ export default function PrivateProfileV2() {
 
         <Card title={t.skills}>
           <div className="flex flex-wrap gap-2">
-            {data.skills.map((s, i) => <Chip key={`${s}-${i}`}><Zap className="w-3 h-3" />{s}</Chip>)}
-            {!data.skills.length && <p className="text-xs text-[#e1ebed] italic">{t.noSkills}</p>}
+            {data.skills.map((s, i) => (
+              <Chip key={`${s}-${i}`}>
+                <Zap className="w-3 h-3" />
+                {s}
+              </Chip>
+            ))}
+            {!data.skills.length && (
+              <p className="text-xs text-[#e1ebed] italic">{t.noSkills}</p>
+            )}
           </div>
           <InlineEditButton onClick={goToCareerForm} label={t.editCareerForm} />
         </Card>
@@ -940,9 +1375,17 @@ export default function PrivateProfileV2() {
         <Card title={t.education}>
           <div className="space-y-5">
             {data.education.map((edu, i) => (
-              <ItemRow key={i} icon={GraduationCap} title={edu.degree || "—"} subtitle={edu.institution || ""} meta={[edu.major, edu.year].filter(Boolean).join(" · ")} />
+              <ItemRow
+                key={i}
+                icon={GraduationCap}
+                title={edu.degree || "—"}
+                subtitle={edu.institution || ""}
+                meta={[edu.major, edu.year].filter(Boolean).join(" · ")}
+              />
             ))}
-            {!data.education.length && <p className="text-xs text-[#e1ebed] italic">{t.noEducation}</p>}
+            {!data.education.length && (
+              <p className="text-xs text-[#e1ebed] italic">{t.noEducation}</p>
+            )}
           </div>
           <InlineEditButton onClick={goToCareerForm} label={t.editCareerForm} />
         </Card>
@@ -950,14 +1393,29 @@ export default function PrivateProfileV2() {
         <Card title={t.experience}>
           <div className="space-y-5">
             {data.experience.map((exp, i) => (
-              <ItemRow key={i} icon={Briefcase} title={exp.title || "—"} subtitle={exp.company || ""} meta={exp.duration || ""} description={exp.description || ""} />
+              <ItemRow
+                key={i}
+                icon={Briefcase}
+                title={exp.title || "—"}
+                subtitle={exp.company || ""}
+                meta={exp.duration || ""}
+                description={exp.description || ""}
+              />
             ))}
-            {!data.experience.length && <p className="text-xs text-[#e1ebed] italic">{t.noExperience}</p>}
-            {!isPaid && <p className="text-[11px] text-[#E0C58F]">{t.upgrade}</p>}
+            {!data.experience.length && (
+              <p className="text-xs text-[#e1ebed] italic">{t.noExperience}</p>
+            )}
+            {!isPaid && (
+              <p className="text-[11px] text-[#E0C58F]">{t.upgrade}</p>
+            )}
           </div>
           <div className="mt-3 text-[11px] text-[#e1ebed] flex flex-wrap gap-2">
-            <Badge tone="muted">{t.expAiCost}: {data.profile_experience_ai_cost}</Badge>
-            <Badge tone="muted">{t.expEditCost}: {data.profile_experience_edit_cost}</Badge>
+            <Badge tone="muted">
+              {t.expAiCost}: {data.profile_experience_ai_cost}
+            </Badge>
+            <Badge tone="muted">
+              {t.expEditCost}: {data.profile_experience_edit_cost}
+            </Badge>
           </div>
           <InlineEditButton onClick={goToCareerForm} label={t.editCareerForm} />
         </Card>
@@ -965,69 +1423,157 @@ export default function PrivateProfileV2() {
         <Card title={t.otherLinks}>
           <div className="space-y-3">
             {data.other_links.map((l, i) => (
-              <a key={i} href={l.url?.startsWith("http") ? l.url : `https://${l.url}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-xl p-3 text-sm text-[#A8B4CC] hover:text-[#12B2C1]" style={{ background: "rgba(60,80,125,0.06)", border: "1px solid rgba(60,80,125,0.15)" }}>
+              <a
+                key={i}
+                href={l.url?.startsWith("http") ? l.url : `https://${l.url}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-xl p-3 text-sm text-[#A8B4CC] hover:text-[#12B2C1]"
+                style={{
+                  background: "rgba(60,80,125,0.06)",
+                  border: "1px solid rgba(60,80,125,0.15)",
+                }}
+              >
                 <LinkIcon className="w-4 h-4" /> {l.type || "link"}
               </a>
             ))}
-            {!data.other_links.length && <p className="text-xs text-[#e1ebed] italic">{t.noLinks}</p>}
+            {!data.other_links.length && (
+              <p className="text-xs text-[#e1ebed] italic">{t.noLinks}</p>
+            )}
           </div>
           <InlineEditButton onClick={goToCareerForm} label={t.editCareerForm} />
         </Card>
 
         <Card title={t.publicPreview}>
-          <p className="text-xs text-[#A8B4CC] leading-[1.8] mb-4">{t.publicPreviewText}</p>
-          <div className="space-y-4 rounded-2xl p-4" style={{ background: "rgba(60,80,125,0.04)", border: "1px solid rgba(60,80,125,0.12)" }}>
+          <p className="text-xs text-[#A8B4CC] leading-[1.8] mb-4">
+            {t.publicPreviewText}
+          </p>
+          <div
+            className="space-y-4 rounded-2xl p-4"
+            style={{
+              background: "rgba(60,80,125,0.04)",
+              border: "1px solid rgba(60,80,125,0.12)",
+            }}
+          >
             <div>
               <h3 className="font-bold text-[#F5F0E9]">{fullName}</h3>
-              <p className="text-xs text-[#A8B4CC]">{data.target_job || data.headline || "—"}</p>
+              <p className="text-xs text-[#A8B4CC]">
+                {data.target_job || data.headline || "—"}
+              </p>
             </div>
-            <p className="text-xs text-[#A8B4CC] leading-[1.8]">{data.ai_summary || "—"}</p>
+            <p className="text-xs text-[#A8B4CC] leading-[1.8]">
+              {data.ai_summary || "—"}
+            </p>
             <InfoText label={t.careerLevel} value={data.career_level || "—"} />
             <div>
               <SectionLabel>{t.skills}</SectionLabel>
               <div className="flex flex-wrap gap-2">
-                {publicSkills.map((s) => <Chip key={s}>{s}</Chip>)}
-                {!publicSkills.length && <span className="text-xs text-[#e1ebed]">—</span>}
+                {publicSkills.map((s) => (
+                  <Chip key={s}>{s}</Chip>
+                ))}
+                {!publicSkills.length && (
+                  <span className="text-xs text-[#e1ebed]">—</span>
+                )}
               </div>
             </div>
             <div>
               <SectionLabel>{t.languages}</SectionLabel>
               <div className="flex flex-wrap gap-2">
                 {publicLanguages.map((item, i) => (
-                  <Chip key={`${languageName(item)}-${i}`}><Languages className="w-3 h-3" />{languageName(item) || "—"}: {languageLevel(item)}</Chip>
+                  <Chip key={`${languageName(item)}-${i}`}>
+                    <Languages className="w-3 h-3" />
+                    {languageName(item) || "—"}: {languageLevel(item)}
+                  </Chip>
                 ))}
               </div>
             </div>
             <div>
               <SectionLabel>{t.latestEducation}</SectionLabel>
-              {latestEdu ? <ItemRow icon={GraduationCap} title={latestEdu.degree || "—"} subtitle={latestEdu.institution || ""} meta={[latestEdu.major, latestEdu.year].filter(Boolean).join(" · ")} /> : <p className="text-xs text-[#e1ebed]">—</p>}
+              {latestEdu ? (
+                <ItemRow
+                  icon={GraduationCap}
+                  title={latestEdu.degree || "—"}
+                  subtitle={latestEdu.institution || ""}
+                  meta={[latestEdu.major, latestEdu.year]
+                    .filter(Boolean)
+                    .join(" · ")}
+                />
+              ) : (
+                <p className="text-xs text-[#e1ebed]">—</p>
+              )}
             </div>
           </div>
         </Card>
 
         <div className="grid grid-cols-3 gap-4">
-          <StatCard icon={FileText} label={t.docs} value={data.documents_generated_count} color="#12B2C1" />
-          <StatCard icon={FileText} label={t.cls} value={data.cover_letters_generated_count} color="#E0C58F" />
-          <StatCard icon={BrainCircuit} label={t.analyses} value={data.analyses_used_count} color="#A8B4CC" />
+          <StatCard
+            icon={FileText}
+            label={t.docs}
+            value={data.documents_generated_count}
+            color="#12B2C1"
+          />
+          <StatCard
+            icon={FileText}
+            label={t.cls}
+            value={data.cover_letters_generated_count}
+            color="#E0C58F"
+          />
+          <StatCard
+            icon={BrainCircuit}
+            label={t.analyses}
+            value={data.analyses_used_count}
+            color="#A8B4CC"
+          />
         </div>
       </div>
     </div>
   );
 }
 
-function Card({ title, children }: { title?: string; children: React.ReactNode }) {
+function Card({
+  title,
+  children,
+}: {
+  title?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-2xl p-5 sm:p-6" style={{ background: "rgba(13,17,23,0.85)", backdropFilter: "blur(24px)", border: "1px solid rgba(60,80,125,0.15)" }}>
-      {title && <h2 className="text-[12px] font-bold text-[#E0C58F] uppercase tracking-widest mb-5">{title}</h2>}
+    <div
+      className="rounded-2xl p-5 sm:p-6"
+      style={{
+        background: "rgba(13,17,23,0.85)",
+        backdropFilter: "blur(24px)",
+        border: "1px solid rgba(60,80,125,0.15)",
+      }}
+    >
+      {title && (
+        <h2 className="text-[12px] font-bold text-[#E0C58F] uppercase tracking-widest mb-5">
+          {title}
+        </h2>
+      )}
       {children}
     </div>
   );
 }
 
-function Badge({ children, tone = "cyan" }: { children: React.ReactNode; tone?: "cyan" | "green" | "muted" }) {
-  const color = tone === "green" ? "#34d399" : tone === "muted" ? "#A8B4CC" : "#12B2C1";
+function Badge({
+  children,
+  tone = "cyan",
+}: {
+  children: React.ReactNode;
+  tone?: "cyan" | "green" | "muted";
+}) {
+  const color =
+    tone === "green" ? "#34d399" : tone === "muted" ? "#A8B4CC" : "#12B2C1";
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{ background: "rgba(60,80,125,0.08)", border: "1px solid rgba(60,80,125,0.18)", color }}>
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+      style={{
+        background: "rgba(60,80,125,0.08)",
+        border: "1px solid rgba(60,80,125,0.18)",
+        color,
+      }}
+    >
       <Sparkles className="w-2.5 h-2.5" /> {children}
     </span>
   );
@@ -1035,28 +1581,69 @@ function Badge({ children, tone = "cyan" }: { children: React.ReactNode; tone?: 
 
 function Chip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#12B2C1]" style={{ background: "rgba(18,178,193,0.07)", border: "1px solid rgba(18,178,193,0.15)" }}>
+    <span
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#12B2C1]"
+      style={{
+        background: "rgba(18,178,193,0.07)",
+        border: "1px solid rgba(18,178,193,0.15)",
+      }}
+    >
       {children}
     </span>
   );
 }
 
-function StatCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: React.ReactNode; color: string }) {
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  color,
+}: {
+  icon: any;
+  label: string;
+  value: React.ReactNode;
+  color: string;
+}) {
   return (
-    <div className="rounded-2xl p-5 text-center" style={{ background: "rgba(13,17,23,0.85)", backdropFilter: "blur(24px)", border: "1px solid rgba(60,80,125,0.15)" }}>
+    <div
+      className="rounded-2xl p-5 text-center"
+      style={{
+        background: "rgba(13,17,23,0.85)",
+        backdropFilter: "blur(24px)",
+        border: "1px solid rgba(60,80,125,0.15)",
+      }}
+    >
       <Icon className="w-5 h-5 mx-auto mb-2" style={{ color }} />
-      <div className="text-lg font-black font-mono mb-1" style={{ color }}>{value}</div>
+      <div className="text-lg font-black font-mono mb-1" style={{ color }}>
+        {value}
+      </div>
       <div className="text-[11px] text-[#A8B4CC]">{label}</div>
     </div>
   );
 }
 
-function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
+function InfoRow({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+}) {
   return (
-    <div className="flex items-center gap-3 rounded-xl p-3" style={{ background: "rgba(60,80,125,0.05)", border: "1px solid rgba(60,80,125,0.14)" }}>
+    <div
+      className="flex items-center gap-3 rounded-xl p-3"
+      style={{
+        background: "rgba(60,80,125,0.05)",
+        border: "1px solid rgba(60,80,125,0.14)",
+      }}
+    >
       <Icon className="w-4 h-4 text-[#12B2C1] flex-shrink-0" />
       <div>
-        <p className="text-[10px] text-[#E0C58F] uppercase tracking-widest">{label}</p>
+        <p className="text-[10px] text-[#E0C58F] uppercase tracking-widest">
+          {label}
+        </p>
         <p className="text-sm text-[#A8B4CC]">{value}</p>
       </div>
     </div>
@@ -1065,53 +1652,202 @@ function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value
 
 function InfoText({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl p-3" style={{ background: "rgba(60,80,125,0.05)", border: "1px solid rgba(60,80,125,0.14)" }}>
-      <p className="text-[10px] text-[#E0C58F] uppercase tracking-widest mb-1">{label}</p>
+    <div
+      className="rounded-xl p-3"
+      style={{
+        background: "rgba(60,80,125,0.05)",
+        border: "1px solid rgba(60,80,125,0.14)",
+      }}
+    >
+      <p className="text-[10px] text-[#E0C58F] uppercase tracking-widest mb-1">
+        {label}
+      </p>
       <p className="text-sm text-[#A8B4CC]">{value}</p>
     </div>
   );
 }
 
-function MiniList({ title, items, tone }: { title: string; items: string[]; tone: "good" | "warn" }) {
+function MiniList({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: string[];
+  tone: "good" | "warn";
+}) {
   const color = tone === "good" ? "#12B2C1" : "#E0C58F";
   return (
-    <div className="rounded-xl p-4" style={{ background: "rgba(60,80,125,0.05)", border: "1px solid rgba(60,80,125,0.14)" }}>
-      <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color }}>{title}</h3>
+    <div
+      className="rounded-xl p-4"
+      style={{
+        background: "rgba(60,80,125,0.05)",
+        border: "1px solid rgba(60,80,125,0.14)",
+      }}
+    >
+      <h3
+        className="text-xs font-bold uppercase tracking-widest mb-3"
+        style={{ color }}
+      >
+        {title}
+      </h3>
       <ul className="space-y-2">
-        {items.length ? items.map((item, i) => <li key={i} className="text-sm text-[#A8B4CC] leading-[1.7]">• {item}</li>) : <li className="text-sm text-[#e1ebed]">—</li>}
+        {items.length ? (
+          items.map((item, i) => (
+            <li key={i} className="text-sm text-[#A8B4CC] leading-[1.7]">
+              • {item}
+            </li>
+          ))
+        ) : (
+          <li className="text-sm text-[#e1ebed]">—</li>
+        )}
       </ul>
     </div>
   );
 }
 
-function ItemRow({ icon: Icon, title, subtitle, meta, description }: { icon: any; title: string; subtitle?: string; meta?: string; description?: string }) {
+function ItemRow({
+  icon: Icon,
+  title,
+  subtitle,
+  meta,
+  description,
+}: {
+  icon: any;
+  title: string;
+  subtitle?: string;
+  meta?: string;
+  description?: string;
+}) {
   return (
     <div className="flex gap-4 pb-4 border-b border-[rgba(60,80,125,0.1)] last:border-0 last:pb-0">
-      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: "rgba(60,80,125,0.1)", border: "1px solid rgba(60,80,125,0.2)" }}>
+      <div
+        className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
+        style={{
+          background: "rgba(60,80,125,0.1)",
+          border: "1px solid rgba(60,80,125,0.2)",
+        }}
+      >
         <Icon className="w-4 h-4 text-[#e1ebed]" />
       </div>
       <div className="flex-1 min-w-0">
         <h3 className="text-sm font-bold text-[#F5F0E9]">{title}</h3>
-        {subtitle && <p className="text-xs text-[#12B2C1] font-medium mt-0.5">{subtitle}</p>}
-        {meta && <p className="text-[12px] text-[#e1ebed] mt-0.5 mb-2 font-mono">{meta}</p>}
-        {description && <p className="text-xs text-[#A8B4CC] leading-[1.8]">{description}</p>}
+        {subtitle && (
+          <p className="text-xs text-[#12B2C1] font-medium mt-0.5">
+            {subtitle}
+          </p>
+        )}
+        {meta && (
+          <p className="text-[12px] text-[#e1ebed] mt-0.5 mb-2 font-mono">
+            {meta}
+          </p>
+        )}
+        {description && (
+          <p className="text-xs text-[#A8B4CC] leading-[1.8]">{description}</p>
+        )}
       </div>
     </div>
   );
 }
 
-function InlineEditButton({ onClick, label }: { onClick: () => void; label: string }) {
+function ContactVisibilityRow({
+  icon: Icon,
+  label,
+  value,
+  enabled,
+  locked,
+  lockedText,
+  publicText,
+  onToggle,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+  enabled: boolean;
+  locked: boolean;
+  lockedText: string;
+  publicText: string;
+  onToggle: (next: boolean) => void;
+}) {
   return (
-    <button onClick={onClick} className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[#A8B4CC] hover:text-[#12B2C1]">
+    <div
+      className="rounded-xl p-4"
+      style={{
+        background: "rgba(60,80,125,0.05)",
+        border: "1px solid rgba(60,80,125,0.14)",
+      }}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <InfoRow icon={Icon} label={label} value={value} />
+          <p className="text-[11px] text-[#7A8FAA] mt-2 leading-relaxed">
+            {locked ? lockedText : publicText}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={locked}
+          onClick={() => onToggle(!enabled)}
+          className={`relative w-11 h-6 rounded-full transition-all flex-shrink-0 ${locked ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+          style={{
+            background:
+              enabled && !locked
+                ? "rgba(18,178,193,0.55)"
+                : "rgba(122,143,170,0.22)",
+            border: "1px solid rgba(255,255,255,0.10)",
+          }}
+          aria-label={label}
+        >
+          <span
+            className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all"
+            style={{
+              left: enabled && !locked ? "calc(100% - 1.375rem)" : "0.125rem",
+            }}
+          />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InlineEditButton({
+  onClick,
+  label,
+}: {
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[#A8B4CC] hover:text-[#12B2C1]"
+    >
       <Edit3 className="w-3.5 h-3.5" /> {label}
     </button>
   );
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="text-[11px] text-[#E0C58F] uppercase tracking-widest mb-2">{children}</p>;
+  return (
+    <p className="text-[11px] text-[#E0C58F] uppercase tracking-widest mb-2">
+      {children}
+    </p>
+  );
 }
 
-function Meta({ icon: Icon, children, className = "" }: { icon: any; children: React.ReactNode; className?: string }) {
-  return <span className={`flex items-center gap-1.5 ${className}`}><Icon className="w-3.5 h-3.5" />{children}</span>;
+function Meta({
+  icon: Icon,
+  children,
+  className = "",
+}: {
+  icon: any;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className={`flex items-center gap-1.5 ${className}`}>
+      <Icon className="w-3.5 h-3.5" />
+      {children}
+    </span>
+  );
 }

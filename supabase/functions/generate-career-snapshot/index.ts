@@ -267,8 +267,7 @@ function buildProfilePayload(params: {
   const otherLinks = normalizeOtherLinks(cvData);
 
   return {
-    // IDENTITY — locked by DB trigger after insert
-    id: userId,
+    // IDENTITY — immutable after insert
     user_id: userId,
     username,
     career_form_id: archive.form_id,
@@ -573,18 +572,76 @@ ${JSON.stringify(cvData, null, 2)}
       improvements,
     });
 
-    const { data: profileRows, error: profileError } = await db
-      .from("profiles")
-      .upsert(profilePayload, { onConflict: "id" })
-      .select(
-        "id,user_id,username,career_form_id,career_submission_id,profile_email,career_level,ats_score,ai_summary,target_job,snapshot_generated_at",
-      );
+    const profileSelect =
+      "id,user_id,username,career_form_id,career_submission_id,profile_email,career_level,ats_score,ai_summary,target_job,snapshot_generated_at";
 
-    if (profileError) {
-      throw new Error(`Failed to upsert profiles: ${profileError.message}`);
+    const { data: existingProfile, error: existingProfileError } = await db
+      .from("profiles")
+      .select("id,user_id,username,career_form_id,career_submission_id,cv_email_public,phone_public")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      throw new Error(`Failed to read existing profile: ${existingProfileError.message}`);
     }
 
-    const profile = Array.isArray(profileRows) ? profileRows[0] ?? null : null;
+    let profile: Record<string, any> | null = null;
+
+    if (existingProfile?.id) {
+      const { data: updatedProfileRows, error: profileError } = await db
+        .from("profiles")
+        .update({
+          // Keep immutable fields untouched:
+          // id, user_id, username, career_form_id, career_submission_id
+          first_name: profilePayload.first_name,
+          last_name: profilePayload.last_name,
+          full_name_ar: profilePayload.full_name_ar,
+          profile_email: profilePayload.profile_email,
+          cv_email: profilePayload.cv_email,
+          phone: profilePayload.phone,
+          gender: profilePayload.gender,
+          nationality: profilePayload.nationality,
+          location: profilePayload.location,
+          headline: profilePayload.headline,
+          target_job: profilePayload.target_job,
+          career_level: profilePayload.career_level,
+          ai_summary: profilePayload.ai_summary,
+          ats_score: profilePayload.ats_score,
+          career_snapshot: profilePayload.career_snapshot,
+          snapshot_strengths: profilePayload.snapshot_strengths,
+          snapshot_improvements: profilePayload.snapshot_improvements,
+          snapshot_generated_at: profilePayload.snapshot_generated_at,
+          skills: profilePayload.skills,
+          education: profilePayload.education,
+          experience: profilePayload.experience,
+          other_links: profilePayload.other_links,
+          updated_at: profilePayload.updated_at,
+        })
+        .eq("user_id", userId)
+        .select(profileSelect);
+
+      if (profileError) {
+        throw new Error(`Failed to update profiles: ${profileError.message}`);
+      }
+
+      profile = Array.isArray(updatedProfileRows) ? updatedProfileRows[0] ?? null : null;
+    } else {
+      const { data: insertedProfileRows, error: profileError } = await db
+        .from("profiles")
+        .insert({
+          id: crypto.randomUUID(),
+          ...profilePayload,
+          cv_email_public: false,
+          phone_public: false,
+        })
+        .select(profileSelect);
+
+      if (profileError) {
+        throw new Error(`Failed to insert profiles: ${profileError.message}`);
+      }
+
+      profile = Array.isArray(insertedProfileRows) ? insertedProfileRows[0] ?? null : null;
+    }
 
     return jsonResponse(
       {
