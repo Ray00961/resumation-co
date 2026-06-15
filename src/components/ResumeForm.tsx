@@ -2416,23 +2416,32 @@ export default function ResumeForm() {
       career_submission_id?: string;
     };
 
-    const waitForProfileMaterialization = async (expectedFormId?: string) => {
-      for (let attempt = 0; attempt < 18; attempt += 1) {
+    const waitForProfileMaterialization = async () => {
+      // The profile row is the source of truth for routing after submit.
+      // Do NOT require career_form_id to equal the current form_id here:
+      // career_form_id is immutable after profile creation, and recovery/edit flows
+      // may materialize a valid profile while keeping its original career_form_id.
+      for (let attempt = 0; attempt < 30; attempt += 1) {
         const rows = await readRows<MaterializedProfileRow>(
           `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${encodeURIComponent(userId)}&select=id,user_id,career_form_id,career_submission_id&limit=1`,
         );
 
         const profile: MaterializedProfileRow | null = rows[0] ?? null;
 
-        if (
-          profile?.user_id === userId &&
-          (!expectedFormId || profile?.career_form_id === expectedFormId)
-        ) {
+        if (profile?.user_id === userId) {
           return profile;
         }
 
-        await sleep(750);
+        await sleep(1000);
       }
+
+      // Last-resort re-check before showing an error, because the Edge Function
+      // can finish just after the polling loop ends.
+      const finalRows = await readRows<MaterializedProfileRow>(
+        `${SUPABASE_URL}/rest/v1/profiles?user_id=eq.${encodeURIComponent(userId)}&select=id,user_id,career_form_id,career_submission_id&limit=1`,
+      );
+      const finalProfile: MaterializedProfileRow | null = finalRows[0] ?? null;
+      if (finalProfile?.user_id === userId) return finalProfile;
 
       throw new Error(
         "Career Profile was saved, but profile materialization did not finish. Please try again.",
@@ -2537,7 +2546,7 @@ export default function ResumeForm() {
 
         if (shouldRegenerateSnapshot) {
           await generateSnapshotForForm(editFormId);
-          await waitForProfileMaterialization(editFormId);
+          await waitForProfileMaterialization();
         }
 
         if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
@@ -2571,7 +2580,7 @@ export default function ResumeForm() {
           );
 
           await generateSnapshotForForm(recoveryArchive.form_id);
-          await waitForProfileMaterialization(recoveryArchive.form_id);
+          await waitForProfileMaterialization();
 
           if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
           navigate("/profile", { replace: true });
@@ -2614,7 +2623,7 @@ export default function ResumeForm() {
         }
 
         await generateSnapshotForForm(formId);
-        await waitForProfileMaterialization(formId);
+        await waitForProfileMaterialization();
 
         if (userId) localStorage.removeItem(`rsm_draft_${userId}`);
         navigate("/profile", { replace: true });
