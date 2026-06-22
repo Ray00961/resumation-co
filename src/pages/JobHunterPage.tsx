@@ -7,10 +7,14 @@ type JobResult = {
   title?: string;
   jobTitle?: string;
   company?: string;
+  companyName?: string;
   sourceType?: ResultType;
   type?: ResultType;
   ats?: string | null;
-  url: string;
+  atsType?: string | null;
+  careerPlatform?: string | null;
+  url?: string;
+  link?: string;
 };
 
 type SearchJobsResponse = {
@@ -105,6 +109,17 @@ export default function JobHunterPage() {
       industry,
       countries,
       country: countries[0] || null,
+
+      // Keep V1 fast enough for browser validation.
+      // The Edge Function defaults are heavier and can timeout in production.
+      companyLimit: 3,
+      queryLimitPerCompany: 1,
+      resultLimit: 20,
+      maxResultsPerCompany: 2,
+
+      // Validation screen: show more than only perfect matches.
+      includeWeakResults: true,
+      includeCareerPages: true,
     };
 
     console.log("AI Hunter search payload:", payload);
@@ -277,7 +292,7 @@ function ResultSection({
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {results.map((result, index) => (
-            <JobCard key={`${result.url}-${index}`} result={result} />
+            <JobCard key={`${result.url || result.link || "job"}-${index}`} result={result} />
           ))}
         </div>
       )}
@@ -303,11 +318,11 @@ function JobCard({ result }: { result: JobResult }) {
       <div className="space-y-2 text-xs text-slate-300">
         <Info label="Source Type" value={type} />
         <Info label="ATS" value={result.ats || "Unknown"} />
-        <Info label="URL" value={shortenUrl(result.url)} />
+        <Info label="URL" value={shortenUrl(result.url || result.link || "")} />
       </div>
 
       <a
-        href={result.url}
+        href={result.url || result.link || "#"}
         target="_blank"
         rel="noreferrer"
         className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
@@ -335,11 +350,11 @@ function normalizeResults(data: SearchJobsResponse | JobResult[] | null | undefi
   if (!data) return [];
 
   if (Array.isArray(data)) {
-    return data.filter(hasUrl);
+    return dedupeAndMapResults(data);
   }
 
   if (Array.isArray(data.data)) {
-    return data.data.filter(hasUrl);
+    return dedupeAndMapResults(data.data);
   }
 
   if (data.data && !Array.isArray(data.data)) {
@@ -360,22 +375,33 @@ function normalizeResults(data: SearchJobsResponse | JobResult[] | null | undefi
     ...(data.careerPagesResults || []),
   ];
 
+  return dedupeAndMapResults(flatResults);
+}
+
+function dedupeAndMapResults(results: JobResult[]): JobResult[] {
   const uniqueByUrl = new Map<string, JobResult>();
 
-  flatResults.filter(hasUrl).forEach((result) => {
-    const type = getType(result);
+  results.forEach((result) => {
+    const mapped = mapApiResultToJobResult(result);
+    if (!mapped.url) return;
 
-    uniqueByUrl.set(result.url, {
-      ...result,
-      sourceType: type,
-    });
+    uniqueByUrl.set(mapped.url, mapped);
   });
 
   return Array.from(uniqueByUrl.values());
 }
 
-function hasUrl(result: JobResult): result is JobResult {
-  return Boolean(result?.url);
+function mapApiResultToJobResult(result: JobResult): JobResult {
+  const sourceType = getType(result);
+
+  return {
+    ...result,
+    title: result.jobTitle || result.title || "Untitled job",
+    company: result.company || result.companyName || "Unknown company",
+    ats: result.ats || result.atsType || result.careerPlatform || "Unknown",
+    url: result.url || result.link || "",
+    sourceType,
+  };
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
