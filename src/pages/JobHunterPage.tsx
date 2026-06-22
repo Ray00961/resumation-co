@@ -13,6 +13,21 @@ type JobResult = {
   url: string;
 };
 
+type SearchJobsResponse = {
+  results?: JobResult[];
+  jobs?: JobResult[];
+  data?: JobResult[] | SearchJobsResponse;
+  officialJobs?: JobResult[];
+  official_jobs?: JobResult[];
+  official?: JobResult[];
+  externalJobs?: JobResult[];
+  external_jobs?: JobResult[];
+  external?: JobResult[];
+  careerPages?: JobResult[];
+  career_pages?: JobResult[];
+  careerPagesResults?: JobResult[];
+};
+
 const INDUSTRIES = [
   "Hospitality",
   "Retail",
@@ -37,6 +52,8 @@ const COUNTRIES = [
   "Egypt",
 ];
 
+const SEARCH_TIMEOUT_MS = 60000;
+
 export default function JobHunterPage() {
   const [jobTitle, setJobTitle] = useState("");
   const [industry, setIndustry] = useState("");
@@ -44,6 +61,7 @@ export default function JobHunterPage() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<JobResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [debugMessage, setDebugMessage] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
     const visible = results.filter((r) => getType(r) !== "noise");
@@ -64,7 +82,9 @@ export default function JobHunterPage() {
   }
 
   async function handleSearch() {
-    if (!jobTitle.trim()) {
+    const cleanJobTitle = jobTitle.trim();
+
+    if (!cleanJobTitle) {
       setError("Job title is required.");
       return;
     }
@@ -76,29 +96,47 @@ export default function JobHunterPage() {
 
     setLoading(true);
     setError(null);
+    setDebugMessage("Calling search-jobs...");
     setResults([]);
 
+    const payload = {
+      jobTitle: cleanJobTitle,
+      title: cleanJobTitle,
+      industry,
+      countries,
+      country: countries[0] || null,
+    };
+
+    console.log("AI Hunter search payload:", payload);
+
     try {
-      const { data, error } = await supabase.functions.invoke("search-jobs", {
-        body: {
-          jobTitle: jobTitle.trim(),
-          industry,
-          countries,
-        },
-      });
+      const response = await withTimeout(
+        supabase.functions.invoke("search-jobs", {
+          body: payload,
+        }),
+        SEARCH_TIMEOUT_MS
+      );
 
-      if (error) throw error;
+      console.log("AI Hunter raw response:", response);
 
-      const incomingResults =
-        data?.results ||
-        data?.jobs ||
-        data?.data ||
-        [];
+      if (response.error) {
+        throw response.error;
+      }
 
-      setResults(Array.isArray(incomingResults) ? incomingResults : []);
+      const normalizedResults = normalizeResults(response.data as SearchJobsResponse);
+
+      setResults(normalizedResults);
+      setDebugMessage(`Search completed. ${normalizedResults.length} visible/raw results received.`);
     } catch (err: any) {
       console.error("AI Hunter search error:", err);
-      setError(err?.message || "Search failed. Please try again.");
+
+      const message =
+        err?.message ||
+        err?.context?.message ||
+        "Search failed. Please check the Edge Function logs.";
+
+      setError(message);
+      setDebugMessage(null);
     } finally {
       setLoading(false);
     }
@@ -127,6 +165,11 @@ export default function JobHunterPage() {
               <input
                 value={jobTitle}
                 onChange={(e) => setJobTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !loading) {
+                    handleSearch();
+                  }
+                }}
                 placeholder="e.g. Waiter, Accountant, Frontend Developer"
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm outline-none placeholder:text-slate-500 focus:border-cyan-400"
               />
@@ -152,6 +195,7 @@ export default function JobHunterPage() {
 
             <div className="flex items-end">
               <button
+                type="button"
                 onClick={handleSearch}
                 disabled={loading}
                 className="w-full rounded-xl bg-cyan-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
@@ -171,6 +215,7 @@ export default function JobHunterPage() {
 
                 return (
                   <button
+                    type="button"
                     key={country}
                     onClick={() => toggleCountry(country)}
                     className={`rounded-full border px-4 py-2 text-xs font-medium transition ${
@@ -185,6 +230,12 @@ export default function JobHunterPage() {
               })}
             </div>
           </div>
+
+          {debugMessage && (
+            <div className="mt-4 rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100">
+              {debugMessage}
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -278,6 +329,68 @@ function Info({ label, value }: { label: string; value: string }) {
 
 function getType(result: JobResult): ResultType {
   return result.sourceType || result.type || "noise";
+}
+
+function normalizeResults(data: SearchJobsResponse | JobResult[] | null | undefined): JobResult[] {
+  if (!data) return [];
+
+  if (Array.isArray(data)) {
+    return data.filter(hasUrl);
+  }
+
+  if (Array.isArray(data.data)) {
+    return data.data.filter(hasUrl);
+  }
+
+  if (data.data && !Array.isArray(data.data)) {
+    return normalizeResults(data.data);
+  }
+
+  const flatResults = [
+    ...(data.results || []),
+    ...(data.jobs || []),
+    ...(data.officialJobs || []),
+    ...(data.official_jobs || []),
+    ...(data.official || []),
+    ...(data.externalJobs || []),
+    ...(data.external_jobs || []),
+    ...(data.external || []),
+    ...(data.careerPages || []),
+    ...(data.career_pages || []),
+    ...(data.careerPagesResults || []),
+  ];
+
+  const uniqueByUrl = new Map<string, JobResult>();
+
+  flatResults.filter(hasUrl).forEach((result) => {
+    const type = getType(result);
+
+    uniqueByUrl.set(result.url, {
+      ...result,
+      sourceType: type,
+    });
+  });
+
+  return Array.from(uniqueByUrl.values());
+}
+
+function hasUrl(result: JobResult): result is JobResult {
+  return Boolean(result?.url);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => {
+        reject(
+          new Error(
+            `Search timed out after ${Math.round(timeoutMs / 1000)} seconds. Check Supabase Edge Function logs for search-jobs.`
+          )
+        );
+      }, timeoutMs);
+    }),
+  ]);
 }
 
 function shortenUrl(url: string) {
