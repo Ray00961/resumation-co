@@ -23,6 +23,7 @@ import SuccessPage from "./components/SuccessPage";
 import ContactPage from "./components/ContactPage";
 import PrivateProfileV2 from "./pages/PrivateProfileV2";
 import PublicProfile from "./pages/PublicProfile";
+import JobHunterPage from "./pages/JobHunterPage";
 import Terms from "./components/Terms";
 import Privacy from "./components/Privacy";
 import AboutPage from "./components/AboutPage";
@@ -36,7 +37,7 @@ import GoldLinks from "./GoldLinks";
 import AnalysisLinks from "./AnalysisLinks";
 
 // Pages that use the Sidebar — Footer hidden on these
-const SIDEBAR_PATHS = ["/dashboard", "/my-account", "/account", "/analyse", "/career-analysis", "/profile"];
+const SIDEBAR_PATHS = ["/dashboard", "/my-account", "/account", "/analyse", "/career-analysis", "/profile", "/ai-hunter"];
 
 function ConditionalFooter() {
   const { pathname } = useLocation();
@@ -108,6 +109,9 @@ export default function App() {
               }/>
               <Route path="/profile" element={
                 <ProtectedRoute><SidebarLayout><PrivateProfileV2 /></SidebarLayout></ProtectedRoute>
+              }/>
+              <Route path="/ai-hunter" element={
+                <ProtectedRoute><SidebarLayout><JobHunterPage /></SidebarLayout></ProtectedRoute>
               }/>
 
               {/* ══ PROTECTED — Full screen ══ */}
