@@ -622,10 +622,10 @@ serve(async (req) => {
 
     const jobTitle = clean(body.jobTitle || "Housekeeping");
     const industry = clean(body.industry || "");
-    const companyLimit = Math.max(1, Math.min(Number(body.companyLimit ?? 20), 75));
-    const queryLimitPerCompany = Math.max(1, Math.min(Number(body.queryLimitPerCompany ?? 4), 10));
-    const resultLimit = Math.max(1, Math.min(Number(body.resultLimit ?? 30), 100));
-    const maxResultsPerCompany = Math.max(1, Math.min(Number(body.maxResultsPerCompany ?? 3), 10));
+    const companyLimit = Math.max(1, Math.min(Number(body.companyLimit ?? 3), 75));
+    const queryLimitPerCompany = Math.max(1, Math.min(Number(body.queryLimitPerCompany ?? 1), 10));
+    const resultLimit = Math.max(1, Math.min(Number(body.resultLimit ?? 10), 100));
+    const maxResultsPerCompany = Math.max(1, Math.min(Number(body.maxResultsPerCompany ?? 1), 10));
     const includeWeakResults = Boolean(body.includeWeakResults ?? false);
     const includeCareerPages = Boolean(body.includeCareerPages ?? false);
 
