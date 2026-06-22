@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { supabase } from "../supabase";
 
 type ResultType = "official_job" | "external_job_board" | "career_page" | "noise";
 
@@ -126,19 +125,27 @@ export default function JobHunterPage() {
 
     try {
       const response = await withTimeout(
-        supabase.functions.invoke("search-jobs", {
-          body: payload,
+        fetch("https://nbbxtealrhrnadlzmkev.supabase.co/functions/v1/search-jobs", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify(payload),
         }),
         SEARCH_TIMEOUT_MS
       );
 
-      console.log("AI Hunter raw response:", response);
+      const data = await response.json();
 
-      if (response.error) {
-        throw response.error;
+      console.log("AI Hunter raw response:", data);
+
+      if (!response.ok) {
+        throw new Error(data?.message || data?.error || `HTTP ${response.status}`);
       }
 
-      const normalizedResults = normalizeResults(response.data as SearchJobsResponse);
+      const normalizedResults = normalizeResults(data as SearchJobsResponse);
 
       setResults(normalizedResults);
       setDebugMessage(`Search completed. ${normalizedResults.length} visible/raw results received.`);
