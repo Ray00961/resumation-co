@@ -387,7 +387,6 @@ export default function SuccessPage() {
 
     const activeGid = gidRef.current;
     const token     = tokenRef.current;
-    const userId    = userIdRef.current;
 
     if (!activeGid || !token) {
       console.error("[SuccessPage] Missing generation_id or token — cannot generate");
@@ -397,15 +396,6 @@ export default function SuccessPage() {
     setGenerating(lang);
 
     const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-
-    // Fire-and-forget: persist the user's language choice on the order row
-    supabase
-      .from("order_generations")
-      .update({ selected_language: lang })
-      .eq("generation_id", activeGid)
-      .eq("user_id", userId)
-      .then(() => {})
-      .catch(e => console.error("[SuccessPage] lang update:", e));
 
     // Fire-and-forget: kick off generation.
     // generation_id = Tier-1 PK lookup in generate-cv — always precise, no fallbacks.
