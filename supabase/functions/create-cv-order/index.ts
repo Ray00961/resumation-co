@@ -20,6 +20,74 @@ const PAYMOB_LINKS: Record<string, string> = {
   ai_search: Deno.env.get("PAYMOB_AI_SEARCH_LINK") ?? "",
 };
 
+// ══════════════════════════════════════════════════════════════════════════════
+// WISHMONEY SERVER-SIDE PRICING — SINGLE SOURCE OF TRUTH
+//
+// The client MUST NOT be able to choose what it pays. Everything below is
+// computed here, from the authenticated user's own database state — never from
+// the request body. `amount`, `currency`, `has_referral` and `coins` sent by the
+// browser are ignored entirely.
+//
+// SCOPE: WishMoney is the Lebanon rail only (PlansPage sends payment_method
+// "whish" when the user is NOT in Egypt). These are the Lebanon USD prices as
+// currently displayed in src/components/PlansPage.tsx:123 — they are copied
+// verbatim, not re-derived. Egypt/Paymob pricing is untouched by this block.
+//
+// ⚠ KEEP IN SYNC with the identical block in
+//   supabase/functions/webhook-wishmoney/index.ts
+// ══════════════════════════════════════════════════════════════════════════════
+const WISHMONEY_PLANS = ["premium", "gold", "ai_search"] as const;
+type WishMoneyPlan = (typeof WISHMONEY_PLANS)[number];
+
+const WISHMONEY_CURRENCY = "USD";
+
+// Lebanon list prices — mirrors PlansPage.tsx:123 (the non-Egypt BASE branch).
+const WISHMONEY_PRICES: Record<WishMoneyPlan, number> = {
+  premium:   25,
+  gold:      40,
+  ai_search: 10,
+};
+
+// Referral rule — mirrors PlansPage.tsx:126-127:
+// a referred user gets 50% off, except on ai_search (which gets 2x coins instead).
+const REFERRAL_DISCOUNT_EXEMPT: readonly WishMoneyPlan[] = ["ai_search"];
+
+function isWishMoneyPlan(value: unknown): value is WishMoneyPlan {
+  return typeof value === "string" &&
+    (WISHMONEY_PLANS as readonly string[]).includes(value);
+}
+
+/** Canonical price for a plan. `hasReferral` comes from the DB, never from the client. */
+function wishMoneyPrice(plan: WishMoneyPlan, hasReferral: boolean): number {
+  const base = WISHMONEY_PRICES[plan];
+  return hasReferral && !REFERRAL_DISCOUNT_EXEMPT.includes(plan) ? base / 2 : base;
+}
+
+/**
+ * Canonical string form of an amount. Both the signature and the WishMoney API
+ * call use this exact representation so the webhook can reproduce it byte-for-byte.
+ */
+function wishMoneyAmountString(amount: number): string {
+  return String(amount);
+}
+
+/**
+ * The message signed by the per-transaction webhook token.
+ * Covering plan + amount + currency (not just tid:fid) means a tampered
+ * callback URL can no longer produce a valid signature.
+ *
+ * ⚠ KEEP IN SYNC with webhook-wishmoney/index.ts
+ */
+function wishMoneySignaturePayload(parts: {
+  tid: string;
+  fid: string;
+  plan: string;
+  amount: string;
+  currency: string;
+}): string {
+  return `${parts.tid}:${parts.fid}:${parts.plan}:${parts.amount}:${parts.currency}`;
+}
+
 // ── HMAC-SHA256 utility (Deno Web Crypto API) ─────────────────────────────────
 // Produces a lowercase hex digest of HMAC-SHA256(secret, message).
 // Used to mint per-transaction webhook tokens embedded in WishMoney callback URLs.
@@ -67,9 +135,12 @@ Deno.serve(async (req) => {
       payment_method,
       plan      = "premium",
       email     = "",
-      amount,
-      currency  = "USD",
     } = body;
+
+    // SECURITY: `amount`, `currency`, `has_referral` and `coins` are deliberately
+    // NOT destructured from the request body. They are still sent by PlansPage
+    // but are ignored — the WishMoney branch below computes price and currency
+    // server-side. Never reintroduce them here.
 
     const normalizedMethod = payment_method?.toLowerCase() ?? "";
 
@@ -146,33 +217,85 @@ Deno.serve(async (req) => {
         );
       }
 
+      // ── Plan whitelist ────────────────────────────────────────────────────────
+      // Only these three plans are purchasable over the WishMoney rail. Anything
+      // else is rejected before a payment order can be created.
+      if (!isWishMoneyPlan(plan)) {
+        console.error("create-cv-order 400: plan not sellable via WishMoney", {
+          plan: String(plan ?? ""),
+          userId: user_id,
+        });
+        return new Response(
+          JSON.stringify({ error: "Invalid plan" }),
+          { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+      const wmPlan: WishMoneyPlan = plan;
+
+      // ── Server-side price resolution ──────────────────────────────────────────
+      // Referral eligibility is read from public.users for the JWT-verified user,
+      // exactly as PlansPage derives it (`!!userData.referred_by`). The client's
+      // own has_referral flag is never consulted.
+      const { data: buyerRow, error: buyerErr } = await db
+        .from("users")
+        .select("referred_by")
+        .eq("id", user_id)
+        .maybeSingle();
+
+      if (buyerErr) {
+        console.error("create-cv-order: referral lookup failed", buyerErr);
+        return new Response(
+          JSON.stringify({ error: "Could not resolve pricing. Please try again." }),
+          { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+
+      const hasReferral = !!buyerRow?.referred_by;
+      const wmAmount    = wishMoneyAmountString(wishMoneyPrice(wmPlan, hasReferral));
+      const wmCurrency  = WISHMONEY_CURRENCY;
+
+      console.log("create-cv-order: server-side price resolved", {
+        plan: wmPlan, amount: wmAmount, currency: wmCurrency, hasReferral,
+      });
+
       const wmExternalId = Date.now();
 
       // ── Per-transaction HMAC webhook token ────────────────────────────────────
-      // token = HMAC-SHA256(WISHMONEY_SECRET, "${wmExternalId}:${form_id}")
+      // token = HMAC-SHA256(WISHMONEY_SECRET, "tid:fid:plan:amount:currency")
       // Embedded as `wt` in every callback/redirect URL so webhook-wishmoney can
       // verify the request is genuine before touching any database row.
-      // WishMoney echoes the callback URL as-is for both POST callbacks and GET
-      // browser redirects, so the same token covers both paths.
+      // The signature now covers the entitlement-bearing fields (plan, amount,
+      // currency) as well, so editing any of them in the callback URL invalidates
+      // the token. WishMoney echoes the callback URL as-is for both POST callbacks
+      // and GET browser redirects, so the same token covers both paths.
       const webhookToken = await hmacSha256Hex(
         WISHMONEY_SECRET,
-        `${wmExternalId}:${form_id}`,
+        wishMoneySignaturePayload({
+          tid:      String(wmExternalId),
+          fid:      form_id,
+          plan:     wmPlan,
+          amount:   wmAmount,
+          currency: wmCurrency,
+        }),
       );
 
       // Callback URL carries the reference context only — no generation_id yet.
       // webhook-wishmoney uses these params to:
-      //   1. verify HMAC token (wt) — rejects anything that fails
-      //   2. verify idempotency via wishmoney_order_id (= tid)
-      //   3. extract cv_archive snapshot via fid
-      //   4. INSERT into order_generations and mint generation_id
-      //   5. redirect browser to /success?gid=<minted_gid>
+      //   1. verify HMAC token (wt) over tid:fid:plan:amount:currency
+      //   2. re-validate plan/amount/currency against its own price table
+      //   3. require status === "success"
+      //   4. verify idempotency via wishmoney_order_id (= tid)
+      //   5. extract cv_archive snapshot via fid
+      //   6. INSERT into order_generations and mint generation_id
+      //   7. redirect browser to /success?gid=<minted_gid>
       const baseCallback =
         `${EF_BASE_URL}/webhook-wishmoney` +
         `?sid=${encodeURIComponent(submission_id)}` +
         `&fid=${encodeURIComponent(form_id)}` +
         `&tid=${wmExternalId}` +
-        `&plan=${encodeURIComponent(plan)}` +
-        `&amount=${encodeURIComponent(String(amount ?? ""))}` +
+        `&plan=${encodeURIComponent(wmPlan)}` +
+        `&amount=${encodeURIComponent(wmAmount)}` +
+        `&currency=${encodeURIComponent(wmCurrency)}` +
         `&wt=${webhookToken}`;
 
       // 15-second hard timeout — WishMoney sandbox was hanging 60+ seconds causing 502
@@ -191,9 +314,9 @@ Deno.serve(async (req) => {
             "User-Agent":   "Whish/1.0 (https://whish.money; support@whish.money)",
           },
           body: JSON.stringify({
-            amount:             String(amount),
-            currency:           currency || "USD",
-            invoice:            `Resumation ${plan} plan`,
+            amount:             wmAmount,
+            currency:           wmCurrency,
+            invoice:            `Resumation ${wmPlan} plan`,
             externalId:         wmExternalId,
             successCallbackUrl: `${baseCallback}&status=success`,
             failureCallbackUrl: `${baseCallback}&status=failed`,

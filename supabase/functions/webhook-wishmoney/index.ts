@@ -115,6 +115,57 @@ async function sendReceiptEmail(params: {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// WISHMONEY SERVER-SIDE PRICING — SINGLE SOURCE OF TRUTH
+//
+// Mirror of the block in supabase/functions/create-cv-order/index.ts. The webhook
+// re-derives the legitimate price set for a plan and refuses to grant entitlement
+// unless the signed callback values match it.
+//
+// SCOPE: WishMoney is the Lebanon rail only. Prices are the Lebanon USD prices as
+// displayed in src/components/PlansPage.tsx:123. Egypt/Paymob is unaffected.
+//
+// ⚠ KEEP IN SYNC with create-cv-order/index.ts — the HMAC payload format and the
+//   price table must match byte-for-byte or every callback will be rejected.
+// ══════════════════════════════════════════════════════════════════════════════
+const WISHMONEY_PLANS = ["premium", "gold", "ai_search"] as const;
+type WishMoneyPlan = (typeof WISHMONEY_PLANS)[number];
+
+const WISHMONEY_CURRENCY = "USD";
+
+const WISHMONEY_PRICES: Record<WishMoneyPlan, number> = {
+  premium:   25,
+  gold:      40,
+  ai_search: 10,
+};
+
+const REFERRAL_DISCOUNT_EXEMPT: readonly WishMoneyPlan[] = ["ai_search"];
+
+function isWishMoneyPlan(value: unknown): value is WishMoneyPlan {
+  return typeof value === "string" &&
+    (WISHMONEY_PLANS as readonly string[]).includes(value);
+}
+
+function wishMoneyPrice(plan: WishMoneyPlan, hasReferral: boolean): number {
+  const base = WISHMONEY_PRICES[plan];
+  return hasReferral && !REFERRAL_DISCOUNT_EXEMPT.includes(plan) ? base / 2 : base;
+}
+
+function wishMoneyAmountString(amount: number): string {
+  return String(amount);
+}
+
+/** ⚠ KEEP IN SYNC with create-cv-order/index.ts */
+function wishMoneySignaturePayload(parts: {
+  tid: string;
+  fid: string;
+  plan: string;
+  amount: string;
+  currency: string;
+}): string {
+  return `${parts.tid}:${parts.fid}:${parts.plan}:${parts.amount}:${parts.currency}`;
+}
+
 async function hmacSha256Hex(secret: string, message: string): Promise<string> {
   const enc = new TextEncoder();
 
@@ -236,6 +287,7 @@ Deno.serve(async (req) => {
   const plan = url.searchParams.get("plan") ?? "premium";
   const status = url.searchParams.get("status") ?? "";
   const amount = url.searchParams.get("amount") ?? "";
+  const currency = url.searchParams.get("currency") ?? "";
   const wt = url.searchParams.get("wt") ?? "";
 
   if (!tid && !fid) {
@@ -263,7 +315,12 @@ Deno.serve(async (req) => {
     });
   }
 
-  const expectedToken = await hmacSha256Hex(WISHMONEY_SECRET, `${tid}:${fid}`);
+  // Signature covers tid:fid:plan:amount:currency — editing any of the
+  // entitlement-bearing params in the callback URL invalidates the token.
+  const expectedToken = await hmacSha256Hex(
+    WISHMONEY_SECRET,
+    wishMoneySignaturePayload({ tid, fid, plan, amount, currency }),
+  );
 
   if (!timingSafeEqual(wt, expectedToken)) {
     console.warn("webhook-wishmoney: rejected — invalid webhook token", {
@@ -285,8 +342,34 @@ Deno.serve(async (req) => {
     });
   }
 
+  // ── Plan whitelist (defence in depth behind the signature) ──────────────────
+  if (!isWishMoneyPlan(plan)) {
+    console.warn("webhook-wishmoney: rejected — plan not sellable via WishMoney", {
+      tid, fid, plan,
+    });
+
+    return new Response(JSON.stringify({ error: "Invalid plan" }), {
+      status: 400,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+  const wmPlan: WishMoneyPlan = plan;
+
+  // Currency is plan-independent, so it can be checked here. The amount check
+  // needs the buyer's referral status and therefore runs after archiveRow below.
+  if (currency !== WISHMONEY_CURRENCY) {
+    console.error("webhook-wishmoney: rejected — currency mismatch", {
+      tid, fid, plan: wmPlan, currency, expectedCurrency: WISHMONEY_CURRENCY,
+    });
+
+    return new Response(JSON.stringify({ error: "Payment validation failed" }), {
+      status: 400,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
   if (status === "failed") {
-    console.log("webhook-wishmoney: payment failed", { sid, fid, tid, plan });
+    console.log("webhook-wishmoney: payment failed", { sid, fid, tid, plan: wmPlan });
 
     if (req.method === "GET") {
       return new Response(null, {
@@ -297,6 +380,27 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({ success: false, status: "failed" }), {
       status: 200,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  }
+
+  // ── Fail-closed on status ───────────────────────────────────────────────────
+  // Entitlement is granted ONLY on an explicit success. Previously any value
+  // other than "failed" (including a missing status) fell through to the INSERT.
+  if (status !== "success") {
+    console.warn("webhook-wishmoney: rejected — status is not 'success'", {
+      tid, fid, plan: wmPlan, status, method: req.method,
+    });
+
+    if (req.method === "GET") {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "https://resumation.co/plans" },
+      });
+    }
+
+    return new Response(JSON.stringify({ success: false, status: status || "unknown" }), {
+      status: 400,
       headers: { ...cors, "Content-Type": "application/json" },
     });
   }
@@ -325,7 +429,7 @@ Deno.serve(async (req) => {
         return new Response(null, {
           status: 302,
           headers: {
-            Location: `https://resumation.co/success?gid=${existing.generation_id}&tid=${tid}&plan=${plan}`,
+            Location: `https://resumation.co/success?gid=${existing.generation_id}&tid=${tid}&plan=${wmPlan}`,
           },
         });
       }
@@ -359,6 +463,41 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Amount re-validation against THIS buyer's referral status ──────────────
+    // Runs after archiveRow.user_id is known and before any INSERT or coin award.
+    // The expected amount is a single value, not a set: a non-referred buyer must
+    // have paid the list price, a referred one the discounted price.
+    const { data: buyerRow, error: buyerErr } = await db
+      .from("users")
+      .select("referred_by")
+      .eq("id", archiveRow.user_id)
+      .maybeSingle();
+
+    if (buyerErr || !buyerRow) {
+      console.error("webhook-wishmoney: rejected — could not resolve buyer for price check", {
+        tid, fid, user_id: archiveRow.user_id, buyerErr,
+      });
+
+      return new Response(JSON.stringify({ error: "Payment validation failed" }), {
+        status: 400,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
+    const hasReferral    = !!buyerRow.referred_by;
+    const expectedAmount = wishMoneyAmountString(wishMoneyPrice(wmPlan, hasReferral));
+
+    if (amount !== expectedAmount) {
+      console.error("webhook-wishmoney: rejected — amount mismatch", {
+        tid, fid, plan: wmPlan, amount, expectedAmount, hasReferral,
+      });
+
+      return new Response(JSON.stringify({ error: "Payment validation failed" }), {
+        status: 400,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: newRow, error: insertErr } = await db
       .from("order_generations")
       .insert({
@@ -380,7 +519,7 @@ Deno.serve(async (req) => {
         preferred_language: archiveRow.preferred_language ?? null,
         region: archiveRow.region ?? null,
 
-        package_name: plan,
+        package_name: wmPlan,
         payment_method: "wishmoney",
         transaction_id: tid,
         wishmoney_order_id: tid,
@@ -419,7 +558,7 @@ Deno.serve(async (req) => {
             return new Response(null, {
               status: 302,
               headers: {
-                Location: `https://resumation.co/success?gid=${raceExisting.generation_id}&tid=${tid}&plan=${plan}`,
+                Location: `https://resumation.co/success?gid=${raceExisting.generation_id}&tid=${tid}&plan=${wmPlan}`,
               },
             });
           }
@@ -455,12 +594,12 @@ Deno.serve(async (req) => {
     }
 
     const generation_id = newRow.generation_id as string;
-    const coinsToAdd = PLAN_COINS[plan] ?? 0;
+    const coinsToAdd = PLAN_COINS[wmPlan] ?? 0;
 
     await awardCoinsSafely({
       db,
       userId: archiveRow.user_id,
-      plan,
+      plan: wmPlan,
       generationId: generation_id,
       coinsToAdd,
     });
@@ -472,7 +611,7 @@ Deno.serve(async (req) => {
       transactionId: tid,
       gatewayVoucher: tid,
       gatewayLabel: "Whish Money Voucher Code",
-      plan,
+      plan: wmPlan,
       region: archiveRow.region ?? "LB",
       paymentMethod: "wishmoney",
     }).catch((e) => console.error("webhook-wishmoney: receipt email fire error", e));
@@ -481,7 +620,7 @@ Deno.serve(async (req) => {
       generation_id,
       form_id: fid,
       user_id: archiveRow.user_id,
-      plan,
+      plan: wmPlan,
       tid,
       amount,
       coins_added: coinsToAdd,
@@ -492,7 +631,7 @@ Deno.serve(async (req) => {
       return new Response(null, {
         status: 302,
         headers: {
-          Location: `https://resumation.co/success?gid=${generation_id}&tid=${tid}&plan=${plan}`,
+          Location: `https://resumation.co/success?gid=${generation_id}&tid=${tid}&plan=${wmPlan}`,
         },
       });
     }
