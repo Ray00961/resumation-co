@@ -234,6 +234,8 @@ const LoginPage = () => {
         const parsed = pending ? JSON.parse(pending) : {};
 
         if (accessToken) {
+          // region is deliberately NOT sent: it is client-controlled. The
+          // trusted region is established server-side by resolve-region.
           fetch(EF_USER_SYNC, {
             method: "POST",
             headers: {
@@ -241,7 +243,6 @@ const LoginPage = () => {
               Authorization: `Bearer ${accessToken}`,
             },
             body: JSON.stringify({
-              region: parsed.region || "LB",
               language: parsed.language || lang,
               lat: parsed.lat || 0,
               lon: parsed.lon || 0,
@@ -251,6 +252,24 @@ const LoginPage = () => {
         }
 
         if (pending) localStorage.removeItem("pending_user_data");
+      }
+
+      // ── Trusted region resolution ────────────────────────────────────────
+      // resolve-region derives the country server-side from the platform's
+      // client-IP header and MaxMind, and takes the user id from the JWT.
+      // Nothing about the region is supplied from here. A failure must never
+      // block login: the stored region simply stays as it was.
+      if (accessToken) {
+        try {
+          const { error: regionErr } = await withTimeout(
+            supabase.functions.invoke("resolve-region"),
+            8000,
+            "resolve-region",
+          );
+          if (regionErr) console.warn("resolve-region: region not resolved this session");
+        } catch {
+          console.warn("resolve-region: region not resolved this session");
+        }
       }
 
       const { data: userData, error: userErr } = await withTimeout(
@@ -498,7 +517,8 @@ const LoginPage = () => {
 
     const { error: uErr } = await supabase
       .from("users")
-      .upsert({ id: userId, ...profileData }, { onConflict: "id" });
+      .update(profileData)
+      .eq("id", userId);
 
     if (uErr) {
       setSaving(false);

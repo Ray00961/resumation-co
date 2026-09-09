@@ -29,7 +29,9 @@ Deno.serve(async (req) => {
   // ─────────────────────────────────────────────────────────────────────────
 
   try {
-    const { region, language, lat, lon, timestamp } = await req.json();
+    // region is intentionally not read: users.region is server-authoritative
+    // and is written only by resolve-region.
+    const { language, lat, lon, timestamp } = await req.json();
 
     // Always use the authenticated user's ID and email from the JWT token
     // Never trust userId or email from the request body
@@ -41,7 +43,6 @@ Deno.serve(async (req) => {
     const { error } = await db.from("users").upsert({
       id:                 userId,
       email,
-      region:             region || "LB",
       preferred_language: language || "en",
       latitude:           lat || 0,
       longitude:          lon || 0,
