@@ -84,7 +84,7 @@ const LoginPage = () => {
       lastName: "Last Name",
       usernameLbl: "Professional Username",
       usernamePh: "your_username",
-      usernameHint: "3–20 chars · lowercase · letters, numbers, underscores only",
+      usernameHint: "6–20 chars · lowercase · letters, numbers, underscores only",
       usernameRequired: "Please choose your professional username",
       checking: "Checking...",
       available: "Available!",
@@ -117,7 +117,7 @@ const LoginPage = () => {
       lastName: "اسم العائلة",
       usernameLbl: "اسمك المهني",
       usernamePh: "username_123",
-      usernameHint: "3–20 حرفاً · أحرف إنجليزية صغيرة وأرقام وشرطة سفلية فقط",
+      usernameHint: "6–20 حرفاً · أحرف إنجليزية صغيرة وأرقام وشرطة سفلية فقط",
       usernameRequired: "الرجاء اختيار اسمك المهني",
       checking: "جاري الفحص...",
       available: "متاح!",
@@ -396,7 +396,7 @@ const LoginPage = () => {
     }
   };
 
-  const usernameRegex = /^[a-z0-9_]{3,20}$/;
+  const usernameRegex = /^[a-z0-9_]{6,20}$/;
 
   const handleUsernameChange = (val: string) => {
     const clean = val.toLowerCase().replace(/[^a-z0-9_]/g, "");
@@ -477,7 +477,11 @@ const LoginPage = () => {
       return;
     }
 
-    if (!username.trim() || usernameStatus !== "available") {
+    // Format is the only client-side gate. Uniqueness is enforced by the
+    // users_new_username_key unique index and surfaced via the 23505 handler
+    // below — the availability query cannot see other users under RLS, so it is
+    // UX feedback only and must never be able to block a valid save.
+    if (!usernameRegex.test(username.trim())) {
       setShowUsernameError(true);
       toast.error(t.usernameRequired);
       return;
@@ -549,7 +553,7 @@ const LoginPage = () => {
   const canSave = !!(
     firstName.trim() &&
     lastName.trim() &&
-    usernameStatus === "available" &&
+    usernameRegex.test(username.trim()) &&
     agreedToTerms &&
     !saving
   );

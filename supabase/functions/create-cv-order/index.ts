@@ -202,6 +202,24 @@ Deno.serve(async (req) => {
     const form_id       = archiveRow.form_id as string;
     const submission_id = (archiveRow.submission_id as string) || rawSub || "";
 
+    // ── Trusted buyer state ───────────────────────────────────────────────────
+    // Read once, before any rail is chosen, for the JWT-verified user only.
+    // `referred_by` drives WishMoney pricing; `region`/`region_status` gate the
+    // Paymob rail below. All three come from the database — never from the body.
+    const { data: buyerRow, error: buyerErr } = await db
+      .from("users")
+      .select("referred_by, region, region_status")
+      .eq("id", user_id)
+      .maybeSingle();
+
+    if (buyerErr) {
+      console.error("create-cv-order: buyer lookup failed", buyerErr);
+      return new Response(
+        JSON.stringify({ error: "Could not resolve pricing. Please try again." }),
+        { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
+
     // ════════════════════════════════════════════════════════════════════════════
     // WISHMONEY PATH — Lebanon
     // Completely stateless: call WishMoney API, return collectUrl.
@@ -233,23 +251,9 @@ Deno.serve(async (req) => {
       const wmPlan: WishMoneyPlan = plan;
 
       // ── Server-side price resolution ──────────────────────────────────────────
-      // Referral eligibility is read from public.users for the JWT-verified user,
-      // exactly as PlansPage derives it (`!!userData.referred_by`). The client's
-      // own has_referral flag is never consulted.
-      const { data: buyerRow, error: buyerErr } = await db
-        .from("users")
-        .select("referred_by")
-        .eq("id", user_id)
-        .maybeSingle();
-
-      if (buyerErr) {
-        console.error("create-cv-order: referral lookup failed", buyerErr);
-        return new Response(
-          JSON.stringify({ error: "Could not resolve pricing. Please try again." }),
-          { status: 500, headers: { ...cors, "Content-Type": "application/json" } },
-        );
-      }
-
+      // Referral eligibility comes from the trusted buyer row read above, exactly
+      // as PlansPage derives it (`!!userData.referred_by`). The client's own
+      // has_referral flag is never consulted.
       const hasReferral = !!buyerRow?.referred_by;
       const wmAmount    = wishMoneyAmountString(wishMoneyPrice(wmPlan, hasReferral));
       const wmCurrency  = WISHMONEY_CURRENCY;
@@ -373,6 +377,33 @@ Deno.serve(async (req) => {
     // after the user's browser returns from the gateway).
     // ════════════════════════════════════════════════════════════════════════════
     if (normalizedMethod === "paymob") {
+      // ── Trusted-region gate ───────────────────────────────────────────────────
+      // The Paymob links carry EGP prices baked into the URL, so the rail itself
+      // is the entitlement. It is granted on the server-side region alone — never
+      // on the client's `region` field or its choice of payment_method.
+      //
+      // `region` is written ONLY by resolve-region's clean-verification path, so
+      // "EG" always means MaxMind confirmed an Egyptian IP at some point. A
+      // "flagged" user keeps that verified region and stays eligible. Only
+      // "unverified" is refused, because such a region may be legacy
+      // client-authored data that was never checked server-side. A null or
+      // missing region is not "EG" and is therefore refused as well.
+      const buyerRegion = buyerRow?.region;
+      const buyerStatus = buyerRow?.region_status;
+      const paymobAllowed = buyerRegion === "EG" && buyerStatus !== "unverified";
+
+      if (!paymobAllowed) {
+        console.error("create-cv-order 400: paymob rail not permitted for region", {
+          userId: user_id,
+          regionStatus: String(buyerStatus ?? ""),
+          hasRegion: !!buyerRegion,
+        });
+        return new Response(
+          JSON.stringify({ error: "Selected payment method is not available for your region" }),
+          { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
+
       const paymobLink = PAYMOB_LINKS[plan] ?? "";
       if (!paymobLink) {
         return new Response(
