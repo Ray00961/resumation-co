@@ -29,3 +29,4 @@ dist-ssr
 .env*.local
 full_database_backup.sql
 .vercel
+graphify-out/
