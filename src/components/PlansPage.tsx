@@ -1,12 +1,77 @@
 ﻿import { useEffect, useState } from "react";
-import { Loader2, Globe, Zap, ShieldCheck, Crown, Activity, ArrowRight, Check, Sparkles, Search, PenLine, BrainCircuit, Gift, CheckCircle2 } from "lucide-react";
+import { Loader2, Globe, Zap, ShieldCheck, Crown, Activity, ArrowRight, Check, Sparkles, Search, PenLine, BrainCircuit, Gift, CheckCircle2, Briefcase } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabase";
 import Cookies from "js-cookie";
 import { detectRegion } from "../utils/detectRegion";
 import { useLang } from "../context/LanguageContext";
 
-type PlanType = "free" | "premium" | "gold" | "ai_search";
+type PlanType = "free" | "premium" | "gold" | "ai_search" | "career_package";
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CAREER PACKAGE — server-authoritative purchase
+//
+// The browser sends only the product code and the form it is buying for. Price,
+// currency, market, provider, product version, benefits and the checkout URL are
+// resolved and frozen server-side by create-payment. The price rendered on the
+// card below is display text only and carries no authority.
+// ══════════════════════════════════════════════════════════════════════════════
+const CAREER_PACKAGE_CODE = "career_package";
+
+/** Turns a create-payment error code into something the buyer can act on. */
+function careerPackageErrorMessage(code: unknown, status: number, isAr: boolean): string {
+  const key = typeof code === "string" ? code : "";
+
+  switch (key) {
+    case "region_not_verified":
+    case "market_unavailable":
+    case "product_unavailable_in_market":
+    case "provider_not_supported":
+    case "provider_unavailable":
+    case "route_ambiguous":
+      return isAr
+        ? "الباقة المهنية غير متاحة في منطقتك حالياً."
+        : "The Career Package is not available in your region yet.";
+
+    case "billing_phone_missing":
+      return isAr
+        ? "أضف رقم هاتف إلى سيرتك الذاتية قبل إتمام الشراء."
+        : "Please add a phone number to your CV before purchasing.";
+
+    case "form_not_found":
+      return isAr
+        ? "تعذّر العثور على سيرتك الذاتية. يرجى إعادة تحميل الصفحة."
+        : "Could not find your CV. Please reload the page.";
+
+    case "order_not_resumable":
+      return isAr
+        ? "لديك عملية دفع مفتوحة بالفعل. يرجى المحاولة بعد بضع دقائق."
+        : "A checkout is already open for this CV. Please try again in a few minutes.";
+
+    case "payment_not_configured":
+    case "provider_unreachable":
+    case "provider_rejected":
+    case "provider_reference_missing":
+      return isAr
+        ? "بوابة الدفع غير متاحة حالياً — يرجى المحاولة مرة أخرى."
+        : "Payment gateway unavailable — please try again.";
+
+    case "unauthorized":
+      return isAr
+        ? "انتهت الجلسة — يرجى إعادة تحميل الصفحة."
+        : "Session expired — please reload the page.";
+
+    default:
+      if (status === 401) {
+        return isAr
+          ? "انتهت الجلسة — يرجى إعادة تحميل الصفحة."
+          : "Session expired — please reload the page.";
+      }
+      return isAr
+        ? "تعذّر بدء عملية الدفع — يرجى المحاولة مرة أخرى."
+        : "Could not start checkout — please try again.";
+  }
+}
 
 function readValidSupabaseAuthFromStorage(): { userId: string; email: string | null; accessToken: string } | null {
   try {
@@ -543,6 +608,190 @@ export default function PlansPage() {
     }
   };
 
+  // ── Career Package — the exact owned cv_archive row for this purchase ─────
+  // State first, then the ?id= parameter, then the buyer's own archive. The row
+  // is re-read so the submission_id sent is the one actually stored (null, not
+  // the empty string, when the form has none). Ownership is re-verified
+  // server-side by create-payment; this lookup is convenience, not authority.
+  const resolveOwnedForm = async (
+    uid: string,
+  ): Promise<{ form_id: string; submission_id: string | null } | null> => {
+    const params    = new URLSearchParams(window.location.search);
+    const idFromUrl = params.get("id") || "";
+    const isUrlUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idFromUrl);
+
+    const knownFormId = formId       || (isUrlUuid  ? idFromUrl : "");
+    const knownSid    = submissionId || (!isUrlUuid ? idFromUrl : "");
+
+    const timeout10s = new Promise<{ data: null }>((resolve) =>
+      setTimeout(() => resolve({ data: null }), 10_000),
+    );
+
+    const shape = (row: { form_id: string; submission_id: string | null }) => ({
+      form_id:       row.form_id,
+      submission_id: row.submission_id || null,
+    });
+
+    if (knownFormId) {
+      const byForm = await Promise.race([
+        supabase
+          .from("cv_archive")
+          .select("form_id, submission_id")
+          .eq("user_id", uid)
+          .eq("form_id", knownFormId)
+          .maybeSingle(),
+        timeout10s,
+      ]);
+      if (byForm?.data) return shape(byForm.data);
+    }
+
+    if (knownSid) {
+      const bySid = await Promise.race([
+        supabase
+          .from("cv_archive")
+          .select("form_id, submission_id")
+          .eq("user_id", uid)
+          .eq("submission_id", knownSid)
+          .order("created_at_utc", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        timeout10s,
+      ]);
+      if (bySid?.data) return shape(bySid.data);
+    }
+
+    const latest = await Promise.race([
+      supabase
+        .from("cv_archive")
+        .select("form_id, submission_id")
+        .eq("user_id", uid)
+        .order("created_at_utc", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      timeout10s,
+    ]);
+    if (latest?.data) return shape(latest.data);
+
+    return null;
+  };
+
+  // ── Career Package purchase — create-payment only ─────────────────────────
+  // Deliberately independent of handlePaidPlan: no create-cv-order call, no
+  // Paymob link building, no client-side price, currency, provider or region.
+  const handleCareerPackage = async () => {
+    if (loading !== null) return;   // in-flight guard — blocks double submission
+    setLoading("career_package");
+    setPayError(null);
+
+    try {
+      // 1. Session — same safe resolution the existing plans use.
+      let liveUid:         string | null = null;
+      let liveAccessToken: string | null = null;
+
+      const localAuth = readValidSupabaseAuthFromStorage();
+      if (localAuth) {
+        liveUid         = localAuth.userId;
+        liveAccessToken = localAuth.accessToken;
+      }
+
+      if (!liveUid || !liveAccessToken) {
+        const sessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+        ]);
+
+        if (!sessionResult) {
+          setPayError(isRtl
+            ? "انتهت مهلة التحقق من الجلسة — يرجى إعادة تحميل الصفحة."
+            : "Session check timed out — please reload the page.");
+          setLoading(null);
+          return;
+        }
+
+        const liveSession = sessionResult.data.session;
+        liveUid         = liveSession?.user?.id ?? userId ?? null;
+        liveAccessToken = liveSession?.access_token ?? null;
+      }
+
+      if (!liveUid || !liveAccessToken) {
+        setPayError(isRtl
+          ? "انتهت الجلسة — يرجى إعادة تحميل الصفحة."
+          : "Session expired — please reload the page.");
+        setLoading(null);
+        return;
+      }
+
+      // 2. The exact owned form this package is bought for.
+      const owned = await resolveOwnedForm(liveUid);
+      if (!owned) {
+        setPayError(isRtl
+          ? "تعذّر العثور على سيرتك الذاتية. يرجى إعادة تحميل الصفحة."
+          : "Could not find your CV. Please reload the page.");
+        setLoading(null);
+        return;
+      }
+      setFormId(owned.form_id);
+      setSubmissionId(owned.submission_id || "");
+
+      // 3. create-payment — product code and owned form, nothing else.
+      const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+      const controller   = new AbortController();
+      const timeoutId    = setTimeout(() => controller.abort(), 20_000);
+
+      let res: Response;
+      try {
+        res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment`, {
+          method: "POST",
+          headers: {
+            "Content-Type":  "application/json",
+            "Authorization": `Bearer ${liveAccessToken}`,
+          },
+          body: JSON.stringify({
+            product_code:  CAREER_PACKAGE_CODE,
+            form_id:       owned.form_id,
+            submission_id: owned.submission_id,   // null when the form has none
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchErr: unknown) {
+        clearTimeout(timeoutId);
+        const e = fetchErr as { name?: string; message?: string };
+        setPayError(
+          e?.name === "AbortError" || e?.name === "TimeoutError"
+            ? (isRtl
+                ? "انتهت مهلة بوابة الدفع — يرجى المحاولة مرة أخرى."
+                : "Payment gateway timed out — please try again.")
+            : (isRtl
+                ? "خطأ في الشبكة — تعذّر الوصول إلى خدمة الدفع."
+                : `Network Error: ${e?.message || "Could not reach the payment service."}`),
+        );
+        setLoading(null);
+        return;
+      }
+
+      const result = await res.json().catch(() => ({}));
+
+      if (!res.ok || result?.error || !result?.checkout_url) {
+        setPayError(careerPackageErrorMessage(result?.error, res.status, isRtl));
+        setLoading(null);
+        return;
+      }
+
+      // 4. Redirect to the checkout URL exactly as the server issued it.
+      // `loading` stays set so the card cannot be clicked again during navigation.
+      window.location.assign(result.checkout_url as string);
+
+    } catch (err) {
+      console.error("[handleCareerPackage] unexpected error:", err);
+      setPayError(isRtl
+        ? "حدث خطأ غير متوقع — يرجى المحاولة مرة أخرى."
+        : "An unexpected error occurred — please try again.");
+      setLoading(null);
+    }
+  };
+
   const handleFreePlan = async () => {
     setLoading("free");
     setPayError(null);
@@ -601,6 +850,17 @@ export default function PlansPage() {
       currency: isEgypt ? "EGP" : "USD",
       oneTime: "one-time",
       mostPopular: "Most Popular",
+      cpPill: "Complete package",
+      cpTitle: "Career Package",
+      cpSub: "Everything you need to apply — one payment, no subscription",
+      cpOneTime: "One-time payment",
+      cpFeatures: [
+        "1 ATS-optimized CV",
+        "1 Cover Letter",
+        "Full Professional Profile — Lifetime",
+        "Unique Profile QR — Lifetime",
+      ],
+      cpBtn: "Get Career Package",
       aiPill: "Coin top-up", aiTitle: "AI Hunter", aiSub: "Coins only · No CV build",
       premPill: "Most popular", premTitle: "Premium",     premSub: "Complete ATS Resume Build",
       goldPill: "Full suite",   goldTitle: "Gold Package", goldSub: "Complete Application Suite",
@@ -631,6 +891,17 @@ export default function PlansPage() {
       currency: isEgypt ? "EGP" : "USD",
       oneTime: "دفعة واحدة",
       mostPopular: "الأكثر شعبية",
+      cpPill: "الباقة المتكاملة",
+      cpTitle: "الباقة المهنية",
+      cpSub: "كل ما تحتاجه للتقديم — دفعة واحدة وبدون اشتراك",
+      cpOneTime: "دفعة واحدة",
+      cpFeatures: [
+        "سيرة ذاتية واحدة محسّنة للـ ATS",
+        "رسالة تغطية واحدة",
+        "ملف مهني كامل — مدى الحياة",
+        "رمز QR خاص بملفك — مدى الحياة",
+      ],
+      cpBtn: "احصل على الباقة المهنية",
       aiPill: "شحن رصيد", aiTitle: "AI Hunter", aiSub: "كوينز فقط · بدون بناء CV",
       premPill: "الأكثر طلباً", premTitle: "بريميوم",     premSub: "بناء سيرة ذاتية متكاملة",
       goldPill: "الحزمة الكاملة", goldTitle: "باقة الذهب", goldSub: "مجموعة تقديم متكاملة",
@@ -759,9 +1030,71 @@ export default function PlansPage() {
         )}
 
         {/* ══════════════════════════════════════
+            Career Package — one-time, server-priced
+        ══════════════════════════════════════ */}
+        <div className={`relative rounded-3xl p-px transition-all duration-500 hover:-translate-y-1 ${hasReferral ? "mt-8" : "mt-16"}`}
+          style={{ background: "linear-gradient(145deg, rgba(18,178,193,0.45), rgba(224,197,143,0.28), rgba(255,255,255,0.04))" }}>
+          <div className="absolute inset-0 rounded-3xl pointer-events-none"
+            style={{ boxShadow: "0 0 70px rgba(18,178,193,0.12)" }} />
+
+          <div className="rounded-3xl px-8 py-8 flex flex-col md:flex-row md:items-center justify-between gap-8"
+            style={{ background: "rgba(10,18,28,0.88)", backdropFilter: "blur(32px)" }}>
+
+            {/* Left: identity, price and what is included */}
+            <div className={`flex-1 ${isRtl ? "text-right" : "text-left"}`}>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: "rgba(18,178,193,0.1)", border: "1px solid rgba(18,178,193,0.25)", boxShadow: "0 0 20px rgba(18,178,193,0.15)" }}>
+                  <Briefcase className="w-5 h-5 text-[rgba(18,178,193,0.9)]" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1"
+                    style={{ color: "rgba(18,178,193,0.6)" }}>{t.cpPill}</p>
+                  <h3 className="text-2xl font-black text-white tracking-tight">{t.cpTitle}</h3>
+                </div>
+              </div>
+
+              <p className="text-[12px] mb-5" style={{ color: "rgba(18,178,193,0.5)" }}>{t.cpSub}</p>
+
+              {/* Display price only — create-payment is the pricing authority */}
+              <div className="mb-6 flex items-baseline gap-2 flex-wrap">
+                <span className="text-5xl font-black text-white leading-none">150</span>
+                <div className="flex flex-col items-start">
+                  <span className="text-[rgba(18,178,193,0.7)] text-sm font-bold">EGP</span>
+                  <span className="text-[#e1ebed] text-[11px]">{t.cpOneTime}</span>
+                </div>
+              </div>
+
+              <ul className="grid sm:grid-cols-2 gap-x-6 gap-y-2.5">
+                {t.cpFeatures.map(f => (
+                  <li key={f} className="flex items-center gap-2.5 text-[#C8BFBA] text-[13px]">
+                    <CheckBullet color="teal" /> {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Right: purchase CTA */}
+            <button
+              onClick={handleCareerPackage}
+              disabled={loading !== null}
+              className="flex-shrink-0 w-full md:w-auto px-9 py-4 rounded-2xl text-[12px] font-black uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all duration-300 disabled:opacity-40 whitespace-nowrap"
+              style={{ background: "linear-gradient(135deg, rgba(18,178,193,1), rgba(13,130,150,1))", boxShadow: "0 4px 24px rgba(18,178,193,0.35)" }}
+              onMouseEnter={e => { const b = e.currentTarget; b.style.boxShadow = "0 6px 32px rgba(18,178,193,0.55)"; b.style.transform = "scale(1.01)"; }}
+              onMouseLeave={e => { const b = e.currentTarget; b.style.boxShadow = "0 4px 24px rgba(18,178,193,0.35)"; b.style.transform = "scale(1)"; }}
+            >
+              {loading === "career_package"
+                ? <Loader2 className="animate-spin w-5 h-5" />
+                : <>{t.cpBtn} <ArrowRight className={`w-4 h-4 ${isRtl ? "rotate-180" : ""}`} /></>
+              }
+            </button>
+          </div>
+        </div>
+
+        {/* ══════════════════════════════════════
             Plan Cards  — AI Search | Premium | Gold
         ══════════════════════════════════════ */}
-        <div className={`grid md:grid-cols-3 gap-5 items-center ${hasReferral ? "mt-8" : "mt-16"}`}>
+        <div className="grid md:grid-cols-3 gap-5 items-center mt-16">
 
           {/* ── AI Search Pack ── */}
           <div className="group relative rounded-3xl p-px transition-all duration-500 hover:-translate-y-1"
