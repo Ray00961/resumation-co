@@ -40,8 +40,8 @@ function careerPackageErrorMessage(code: unknown, status: number, isAr: boolean)
 
     case "form_not_found":
       return isAr
-        ? "تعذّر العثور على سيرتك الذاتية. يرجى إعادة تحميل الصفحة."
-        : "Could not find your CV. Please reload the page.";
+        ? "تعذّر التحقق من هذه السيرة الذاتية لحسابك."
+        : "This CV could not be verified for your account.";
 
     case "order_not_resumable":
       return isAr
@@ -608,74 +608,6 @@ export default function PlansPage() {
     }
   };
 
-  // ── Career Package — the exact owned cv_archive row for this purchase ─────
-  // State first, then the ?id= parameter, then the buyer's own archive. The row
-  // is re-read so the submission_id sent is the one actually stored (null, not
-  // the empty string, when the form has none). Ownership is re-verified
-  // server-side by create-payment; this lookup is convenience, not authority.
-  const resolveOwnedForm = async (
-    uid: string,
-  ): Promise<{ form_id: string; submission_id: string | null } | null> => {
-    const params    = new URLSearchParams(window.location.search);
-    const idFromUrl = params.get("id") || "";
-    const isUrlUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idFromUrl);
-
-    const knownFormId = formId       || (isUrlUuid  ? idFromUrl : "");
-    const knownSid    = submissionId || (!isUrlUuid ? idFromUrl : "");
-
-    const timeout10s = new Promise<{ data: null }>((resolve) =>
-      setTimeout(() => resolve({ data: null }), 10_000),
-    );
-
-    const shape = (row: { form_id: string; submission_id: string | null }) => ({
-      form_id:       row.form_id,
-      submission_id: row.submission_id || null,
-    });
-
-    if (knownFormId) {
-      const byForm = await Promise.race([
-        supabase
-          .from("cv_archive")
-          .select("form_id, submission_id")
-          .eq("user_id", uid)
-          .eq("form_id", knownFormId)
-          .maybeSingle(),
-        timeout10s,
-      ]);
-      if (byForm?.data) return shape(byForm.data);
-    }
-
-    if (knownSid) {
-      const bySid = await Promise.race([
-        supabase
-          .from("cv_archive")
-          .select("form_id, submission_id")
-          .eq("user_id", uid)
-          .eq("submission_id", knownSid)
-          .order("created_at_utc", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        timeout10s,
-      ]);
-      if (bySid?.data) return shape(bySid.data);
-    }
-
-    const latest = await Promise.race([
-      supabase
-        .from("cv_archive")
-        .select("form_id, submission_id")
-        .eq("user_id", uid)
-        .order("created_at_utc", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      timeout10s,
-    ]);
-    if (latest?.data) return shape(latest.data);
-
-    return null;
-  };
-
   // ── Career Package purchase — create-payment only ─────────────────────────
   // Deliberately independent of handlePaidPlan: no create-cv-order call, no
   // Paymob link building, no client-side price, currency, provider or region.
@@ -722,17 +654,27 @@ export default function PlansPage() {
         return;
       }
 
-      // 2. The exact owned form this package is bought for.
-      const owned = await resolveOwnedForm(liveUid);
-      if (!owned) {
+      // 2. The form this package is bought for — resolved LOCALLY.
+      // Deliberately no cv_archive read: a database round-trip here would add
+      // no authority (the server re-verifies ownership) while making checkout
+      // depend on the Supabase client being able to resolve a token, which can
+      // stall. The identifiers already known to this page are enough.
+      const params    = new URLSearchParams(window.location.search);
+      const idFromUrl = params.get("id") || "";
+      const isUrlUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idFromUrl);
+
+      const resolvedFormId = formId || (isUrlUuid ? idFromUrl : "");
+      const resolvedSubmissionId =
+        submissionId || (!isUrlUuid && idFromUrl ? idFromUrl : "") || null;
+
+      if (!resolvedFormId) {
         setPayError(isRtl
-          ? "تعذّر العثور على سيرتك الذاتية. يرجى إعادة تحميل الصفحة."
-          : "Could not find your CV. Please reload the page.");
+          ? "تعذّر تحديد سيرتك الذاتية. يرجى فتحها من جديد والمحاولة مرة أخرى."
+          : "Could not identify your CV. Please reopen it and try again.");
         setLoading(null);
         return;
       }
-      setFormId(owned.form_id);
-      setSubmissionId(owned.submission_id || "");
 
       // 3. create-payment — product code and owned form, nothing else.
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -749,8 +691,8 @@ export default function PlansPage() {
           },
           body: JSON.stringify({
             product_code:  CAREER_PACKAGE_CODE,
-            form_id:       owned.form_id,
-            submission_id: owned.submission_id,   // null when the form has none
+            form_id:       resolvedFormId,
+            submission_id: resolvedSubmissionId,  // null when none is known
           }),
           signal: controller.signal,
         });
