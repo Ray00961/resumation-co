@@ -28,6 +28,9 @@ const SERVICE_KEY       = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const PAYMOB_SECRET_KEY          = Deno.env.get("PAYMOB_SECRET_KEY")          ?? "";
 const PAYMOB_PUBLIC_KEY          = Deno.env.get("PAYMOB_PUBLIC_KEY")          ?? "";
 const PAYMOB_CARD_INTEGRATION_ID = Deno.env.get("PAYMOB_CARD_INTEGRATION_ID") ?? "";
+// Optional. When set to a valid integration id, Unified Checkout also offers
+// Mobile Wallet; when unset, empty or invalid, checkout stays Card-only.
+const PAYMOB_WALLET_INTEGRATION_ID = Deno.env.get("PAYMOB_WALLET_INTEGRATION_ID") ?? "";
 
 const PAYMOB_INTENTION_URL = "https://accept.paymob.com/v1/intention/";
 const PAYMOB_CHECKOUT_URL  = "https://accept.paymob.com/unifiedcheckout/";
@@ -85,6 +88,33 @@ function normalizeBillingPhone(raw: unknown): string | null {
 function checkoutUrl(clientSecret: string): string {
   return `${PAYMOB_CHECKOUT_URL}?publicKey=${encodeURIComponent(PAYMOB_PUBLIC_KEY)}` +
          `&clientSecret=${encodeURIComponent(clientSecret)}`;
+}
+
+/**
+ * Non-sensitive summary of the payment methods Paymob attached to an intention:
+ * integration ids and method/gateway type labels only. Built from whitelisted
+ * scalar fields — payment_keys[].key (a payment token), the client secret and
+ * any customer or card data are never read or returned.
+ */
+function summarizeReturnedMethods(data: Record<string, unknown>) {
+  const scalar = (v: unknown): string | number | null =>
+    typeof v === "number" ? v : typeof v === "string" ? v.slice(0, 64) : null;
+  const objects = (v: unknown): Record<string, unknown>[] =>
+    Array.isArray(v)
+      ? v.filter((x): x is Record<string, unknown> => x !== null && typeof x === "object")
+      : [];
+
+  return {
+    methods: objects(data["payment_methods"]).map((m) => ({
+      integrationId: scalar(m["integration_id"]),
+      methodType:    scalar(m["method_type"]),
+      name:          scalar(m["name"]),
+    })),
+    keys: objects(data["payment_keys"]).map((k) => ({
+      integrationId: scalar(k["integration"]),
+      gatewayType:   scalar(k["gateway_type"]),
+    })),
+  };
 }
 
 /**
@@ -152,6 +182,21 @@ Deno.serve(async (req) => {
   if (!Number.isInteger(cardIntegrationId) || cardIntegrationId <= 0) {
     console.error("create-payment: PAYMOB_CARD_INTEGRATION_ID is not a valid integer — rejecting");
     return json({ error: "payment_not_configured" }, 503);
+  }
+
+  // Wallet is OPTIONAL and never blocks Card. A missing value is a legitimate
+  // Card-only configuration; a present-but-unusable value is logged and skipped.
+  const walletRaw = PAYMOB_WALLET_INTEGRATION_ID.trim();
+  const walletCandidate = Number(walletRaw);
+  const walletIntegrationId =
+    walletRaw.length > 0 &&
+    Number.isInteger(walletCandidate) &&
+    walletCandidate > 0 &&
+    walletCandidate !== cardIntegrationId
+      ? walletCandidate
+      : null;
+  if (walletRaw.length > 0 && walletIntegrationId === null) {
+    console.error("create-payment: PAYMOB_WALLET_INTEGRATION_ID is not a usable integration id — continuing Card-only");
   }
 
   try {
@@ -479,7 +524,9 @@ Deno.serve(async (req) => {
     const intentionBody = {
       amount: route.amount_cents,
       currency: route.currency,
-      payment_methods: [cardIntegrationId],
+      payment_methods: walletIntegrationId !== null
+        ? [cardIntegrationId, walletIntegrationId]
+        : [cardIntegrationId],
       billing_data: {
         first_name: customerFirstName,
         last_name: customerLastName,
@@ -539,6 +586,17 @@ Deno.serve(async (req) => {
       });
       return json({ error: "provider_rejected" }, 502);
     }
+
+    // Diagnostic only: which methods were requested vs. which Paymob attached.
+    // Makes a silently dropped Wallet visible. Integration ids and type labels
+    // only — no client secret, payment key, customer or card data.
+    const returned = summarizeReturnedMethods(paymobData);
+    console.log("create-payment: intention payment methods", {
+      orderId,
+      requestedIntegrationIds: intentionBody.payment_methods,
+      returnedMethods: returned.methods,
+      returnedKeys: returned.keys,
+    });
 
     const clientSecret = typeof paymobData["client_secret"] === "string"
       ? (paymobData["client_secret"] as string).trim()
