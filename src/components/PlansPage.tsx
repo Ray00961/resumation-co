@@ -11,12 +11,15 @@ type PlanType = "free" | "premium" | "gold" | "ai_search" | "career_package";
 // ══════════════════════════════════════════════════════════════════════════════
 // CAREER PACKAGE — server-authoritative purchase
 //
-// The browser sends only the product code and the form it is buying for. Price,
-// currency, market, provider, product version, benefits and the checkout URL are
-// resolved and frozen server-side by create-payment. The price rendered on the
-// card below is display text only and carries no authority.
+// The browser sends only the product code, the form it is buying for and the
+// buyer's explicit output language (en|ar). Price, currency, market, provider,
+// product version, benefits and the checkout URL are resolved and frozen
+// server-side by create-payment. The price rendered on the card below is
+// display text only and carries no authority.
 // ══════════════════════════════════════════════════════════════════════════════
 const CAREER_PACKAGE_CODE = "career_package";
+
+type CareerPackageLanguage = "en" | "ar";
 
 /** Turns a create-payment error code into something the buyer can act on. */
 function careerPackageErrorMessage(code: unknown, status: number, isAr: boolean): string {
@@ -32,6 +35,12 @@ function careerPackageErrorMessage(code: unknown, status: number, isAr: boolean)
       return isAr
         ? "الباقة المهنية غير متاحة في منطقتك حالياً."
         : "The Career Package is not available in your region yet.";
+
+    case "selected_language_required":
+    case "invalid_selected_language":
+      return isAr
+        ? "اختر لغة السيرة الذاتية ورسالة التغطية قبل المتابعة."
+        : "Please choose the language of your CV and cover letter.";
 
     case "billing_phone_missing":
       return isAr
@@ -169,6 +178,8 @@ export default function PlansPage() {
   const [userName,        setUserName]        = useState<string | null>(null);
   const [submissionId,    setSubmissionId]    = useState<string | null>(null);
   const [formId,          setFormId]          = useState<string | null>(null);
+  // Explicit buyer choice only — never preselected from the UI language.
+  const [cpLanguage,      setCpLanguage]      = useState<CareerPackageLanguage | null>(null);
   const [loading,         setLoading]         = useState<PlanType | null>(null);
   const [payError,        setPayError]        = useState<string | null>(null);
   const [isCheckingAuth,  setIsCheckingAuth]  = useState(true);
@@ -613,6 +624,14 @@ export default function PlansPage() {
   // Paymob link building, no client-side price, currency, provider or region.
   const handleCareerPackage = async () => {
     if (loading !== null) return;   // in-flight guard — blocks double submission
+
+    // Captured once so the request carries exactly the choice made on click.
+    const chosenLanguage = cpLanguage;
+    if (chosenLanguage !== "en" && chosenLanguage !== "ar") {
+      setPayError(careerPackageErrorMessage("selected_language_required", 400, isRtl));
+      return;
+    }
+
     setLoading("career_package");
     setPayError(null);
 
@@ -676,7 +695,7 @@ export default function PlansPage() {
         return;
       }
 
-      // 3. create-payment — product code and owned form, nothing else.
+      // 3. create-payment — product code, owned form and output language only.
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
       const controller   = new AbortController();
       const timeoutId    = setTimeout(() => controller.abort(), 20_000);
@@ -693,6 +712,7 @@ export default function PlansPage() {
             product_code:  CAREER_PACKAGE_CODE,
             form_id:       resolvedFormId,
             submission_id: resolvedSubmissionId,  // null when none is known
+            selected_language: chosenLanguage,
           }),
           signal: controller.signal,
         });
@@ -803,6 +823,10 @@ export default function PlansPage() {
         "Unique Profile QR — Lifetime",
       ],
       cpBtn: "Get Career Package",
+      cpLangLabel: "CV & cover letter language",
+      cpLangHint: "Choose one. It can't be changed after purchase.",
+      cpLangEn: "English",
+      cpLangAr: "العربية",
       aiPill: "Coin top-up", aiTitle: "AI Hunter", aiSub: "Coins only · No CV build",
       premPill: "Most popular", premTitle: "Premium",     premSub: "Complete ATS Resume Build",
       goldPill: "Full suite",   goldTitle: "Gold Package", goldSub: "Complete Application Suite",
@@ -844,6 +868,10 @@ export default function PlansPage() {
         "رمز QR خاص بملفك — مدى الحياة",
       ],
       cpBtn: "احصل على الباقة المهنية",
+      cpLangLabel: "لغة السيرة الذاتية ورسالة التغطية",
+      cpLangHint: "اختر لغة واحدة. لا يمكن تغييرها بعد الشراء.",
+      cpLangEn: "English",
+      cpLangAr: "العربية",
       aiPill: "شحن رصيد", aiTitle: "AI Hunter", aiSub: "كوينز فقط · بدون بناء CV",
       premPill: "الأكثر طلباً", premTitle: "بريميوم",     premSub: "بناء سيرة ذاتية متكاملة",
       goldPill: "الحزمة الكاملة", goldTitle: "باقة الذهب", goldSub: "مجموعة تقديم متكاملة",
@@ -1014,12 +1042,40 @@ export default function PlansPage() {
                   </li>
                 ))}
               </ul>
+
+              {/* Output language — explicit choice, sent to create-payment and frozen on the order */}
+              <div className="mt-6" role="radiogroup" aria-label={t.cpLangLabel}>
+                <p className="text-[11px] font-black uppercase tracking-[0.15em] mb-2"
+                  style={{ color: "rgba(18,178,193,0.7)" }}>{t.cpLangLabel}</p>
+                <div className="flex gap-2">
+                  {(["en", "ar"] as const).map(code => {
+                    const selected = cpLanguage === code;
+                    return (
+                      <button
+                        key={code}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        disabled={loading !== null}
+                        onClick={() => { setCpLanguage(code); setPayError(null); }}
+                        className="px-5 py-2 rounded-xl text-[13px] font-bold transition-all duration-200 disabled:opacity-40"
+                        style={selected
+                          ? { background: "rgba(18,178,193,0.18)", border: "1px solid rgba(18,178,193,0.8)", color: "#ffffff" }
+                          : { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.12)", color: "#C8BFBA" }}
+                      >
+                        {code === "en" ? t.cpLangEn : t.cpLangAr}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-[#e1ebed] mt-2">{t.cpLangHint}</p>
+              </div>
             </div>
 
             {/* Right: purchase CTA */}
             <button
               onClick={handleCareerPackage}
-              disabled={loading !== null}
+              disabled={loading !== null || cpLanguage === null}
               className="flex-shrink-0 w-full md:w-auto px-9 py-4 rounded-2xl text-[12px] font-black uppercase tracking-widest text-white flex items-center justify-center gap-2 transition-all duration-300 disabled:opacity-40 whitespace-nowrap"
               style={{ background: "linear-gradient(135deg, rgba(18,178,193,1), rgba(13,130,150,1))", boxShadow: "0 4px 24px rgba(18,178,193,0.35)" }}
               onMouseEnter={e => { const b = e.currentTarget; b.style.boxShadow = "0 6px 32px rgba(18,178,193,0.55)"; b.style.transform = "scale(1.01)"; }}

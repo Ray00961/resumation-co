@@ -1,10 +1,16 @@
 // create-payment — canonical payment order creation (Paymob card rail).
 //
-// The browser may send ONLY { product_code, form_id?, submission_id? }. Every
-// value that decides what is bought, at what price, in which market, through
-// which provider, in which environment, with which benefits, is resolved here
-// from trusted server-side state and then frozen by the database triggers on
-// public.payment_orders. Nothing in the request body can influence it.
+// The browser may send ONLY { product_code, form_id?, submission_id?,
+// selected_language? }. Every value that decides what is bought, at what price,
+// in which market, through which provider, in which environment, with which
+// benefits, is resolved here from trusted server-side state and then frozen by
+// the database triggers on public.payment_orders. Nothing in the request body
+// can influence it.
+//
+// selected_language is the buyer's product preference (the output language of
+// the generated CV and cover letter), not payment authority. It is required,
+// exactly 'en' or 'ar', for products whose version grants generation, written
+// in the order INSERT, and immutable afterwards (payment_orders trigger).
 //
 // This function NEVER performs fulfilment. It does not settle an order, grant
 // entitlements, issue an invoice, award coins, create order_generations or
@@ -58,6 +64,11 @@ const FALLBACK_FIRST_NAME = "Resumation";
 const FALLBACK_LAST_NAME  = "Customer";
 
 const PRODUCT_CODE_RE = /^[a-z][a-z0-9_]{0,63}$/;
+const SELECTED_LANGUAGES = ["en", "ar"] as const;
+type SelectedLanguage = typeof SELECTED_LANGUAGES[number];
+// Benefits whose fulfilment produces language-specific documents. A product
+// version granting any of them needs a frozen selected_language.
+const GENERATION_BENEFITS = ["cv_generation", "cover_letter_generation"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function json(body: unknown, status: number): Response {
@@ -200,7 +211,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // ── 3. Request contract — exactly three accepted fields ───────────────────
+    // ── 3. Request contract — exactly four accepted fields ────────────────────
     let body: Record<string, unknown>;
     try {
       const parsed = await req.json();
@@ -229,6 +240,17 @@ Deno.serve(async (req) => {
     }
     if (!rawFormId && !rawSubmissionId) {
       return json({ error: "form_id_or_submission_id_required" }, 400);
+    }
+
+    // Exact match only: no trimming, case folding or default. Absent (or null)
+    // is checked against the product below; any other value is refused here.
+    const rawLanguage = body["selected_language"];
+    let selectedLanguage: SelectedLanguage | null = null;
+    if (rawLanguage !== undefined && rawLanguage !== null) {
+      if (!SELECTED_LANGUAGES.includes(rawLanguage as SelectedLanguage)) {
+        return json({ error: "invalid_selected_language" }, 400);
+      }
+      selectedLanguage = rawLanguage as SelectedLanguage;
     }
 
     // SECURITY: amount, currency, price, discount, market, provider, region,
@@ -299,7 +321,7 @@ Deno.serve(async (req) => {
     // ── 7. Route — the single authority for provider, price and currency ─────
     const { data: routes, error: routeErr } = await db
       .from("payment_routes")
-      .select("id, market, product, provider, amount_cents, currency, coins_to_grant, creates_generation")
+      .select("id, market, product, provider, amount_cents, currency, coins_to_grant, creates_generation, product_version_id")
       .eq("market", market)
       .eq("product", productCode)
       .eq("active", true);
@@ -326,6 +348,28 @@ Deno.serve(async (req) => {
         market, productCode, provider: route.provider,
       });
       return json({ error: "provider_not_supported" }, 409);
+    }
+
+    // ── 7b. Output language — required exactly when the product generates ────
+    // Whether a language is needed is decided by the route's product version
+    // (server configuration), never by the caller.
+    const { data: generationBenefits, error: benefitErr } = await db
+      .from("product_version_benefits")
+      .select("benefit_type")
+      .eq("product_version_id", route.product_version_id)
+      .in("benefit_type", GENERATION_BENEFITS);
+
+    if (benefitErr) {
+      console.error("create-payment: product benefit lookup failed", { code: benefitErr.code });
+      return json({ error: "server_error" }, 500);
+    }
+
+    const requiresLanguage = (generationBenefits?.length ?? 0) > 0;
+    if (requiresLanguage && selectedLanguage === null) {
+      return json({ error: "selected_language_required" }, 400);
+    }
+    if (!requiresLanguage && selectedLanguage !== null) {
+      return json({ error: "selected_language_not_applicable" }, 400);
     }
 
     // ── 8. Provider environment — server configuration, never caller choice ──
@@ -417,6 +461,14 @@ Deno.serve(async (req) => {
       ? existingFilter.is("submission_id", null)
       : existingFilter.eq("submission_id", submissionId);
 
+    // Language is part of compatibility: an 'en' order is never reused for an
+    // 'ar' request or vice versa. Pre-Step-3A pending orders carry NULL, never
+    // match a language request, and are left untouched (the column is
+    // immutable); a new order is created instead.
+    existingFilter = selectedLanguage === null
+      ? existingFilter.is("selected_language", null)
+      : existingFilter.eq("selected_language", selectedLanguage);
+
     const { data: existingOrder, error: existingErr } = await existingFilter
       .order("created_at", { ascending: false })
       .limit(1)
@@ -486,6 +538,7 @@ Deno.serve(async (req) => {
           customer_first_name_snapshot: customerFirstName,
           customer_last_name_snapshot: customerLastName,
           customer_username_snapshot: customerUsername,
+          selected_language: selectedLanguage,
         })
         .select("id, expires_at")
         .single();
