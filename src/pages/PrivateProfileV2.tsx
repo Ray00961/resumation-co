@@ -192,10 +192,22 @@ function cleanText(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function isPaidPlan(plan: unknown) {
-  const value = cleanText(plan).toLowerCase();
-  return Boolean(
-    value && !["free", "starter", "none", "trial"].includes(value),
+// Row shape returned by the get_my_entitlements() RPC (fields used here only).
+type EntitlementRow = {
+  benefit_type: string;
+  status: string;
+  expires_at: string | null;
+  quantity_remaining: number | null;
+};
+
+// Mirrors public.has_entitlement(): active, not expired, and quantity left
+// (lifetime benefits have no quantity). Display-only — public exposure is
+// enforced server-side by get_public_profile.
+function isActiveEntitlement(row: EntitlementRow) {
+  return (
+    row.status === "active" &&
+    (!row.expires_at || new Date(row.expires_at).getTime() > Date.now()) &&
+    (row.quantity_remaining === null || row.quantity_remaining > 0)
   );
 }
 
@@ -377,6 +389,12 @@ export default function PrivateProfileV2() {
   const [data, setData] = useState<ProfileState>(EMPTY);
   const [userId, setUserId] = useState("");
   const [loading, setLoading] = useState(true);
+  // Two separate benefits: Professional Profile unlocks paid profile content;
+  // Profile QR is a distinct benefit and is NOT functional in this step.
+  const [entitlements, setEntitlements] = useState({
+    professionalProfile: false,
+    profileQr: false,
+  });
   const [saving, setSaving] = useState(false);
   const [photoEditMode, setPhotoEditMode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -415,6 +433,7 @@ export default function PrivateProfileV2() {
       private: "Private",
       public: "Public",
       noPlan: "Free profile",
+      paidProfile: "Professional Profile",
       identity: "Profile Identity",
       publicLink: "Public Profile Link",
       usernameLabel: "Username",
@@ -488,6 +507,7 @@ export default function PrivateProfileV2() {
       private: "خاص",
       public: "عام",
       noPlan: "ملف مجاني",
+      paidProfile: "الملف المهني",
       identity: "هوية الملف",
       publicLink: "رابط الملف العام",
       usernameLabel: "اسم المستخدم",
@@ -546,7 +566,8 @@ export default function PrivateProfileV2() {
     },
   }[lang];
 
-  const isPaid = isPaidPlan(data.active_plan);
+  // The ONLY owner-facing paid authority. profiles.active_plan is not read.
+  const hasProfessionalProfile = entitlements.professionalProfile;
   const fullName =
     [data.first_name, data.last_name].filter(Boolean).join(" ") ||
     data.full_name_ar ||
@@ -556,8 +577,8 @@ export default function PrivateProfileV2() {
       .filter(Boolean)
       .join("")
       .toUpperCase() || "?";
-  const publicSkills = isPaid ? data.skills : data.skills.slice(0, 3);
-  const publicLanguages = isPaid
+  const publicSkills = hasProfessionalProfile ? data.skills : data.skills.slice(0, 3);
+  const publicLanguages = hasProfessionalProfile
     ? data.languages
     : pickFreeLanguages(data.languages);
   const latestEdu = data.education[0] || null;
@@ -756,6 +777,47 @@ export default function PrivateProfileV2() {
 
         if (!cancelled) setData(profileFromRow(row, fallback));
 
+        // Entitlements decide paid Professional Profile state. Plain REST with
+        // the session token — not supabase.rpc(), which can stall on the
+        // shared auth lock and silently return no data. Fails closed: on any
+        // error both benefits stay false. Awaited here so `loading` cannot
+        // finish before it resolves (no free→paid flicker).
+        if (session.access_token) {
+          try {
+            const entRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/rpc/get_my_entitlements`,
+              {
+                method: "POST",
+                headers: {
+                  apikey: SUPABASE_KEY,
+                  Authorization: `Bearer ${session.access_token}`,
+                  "Content-Type": "application/json",
+                },
+                body: "{}",
+              },
+            );
+            if (entRes.ok) {
+              const entRows = await entRes.json();
+              const rows: EntitlementRow[] = Array.isArray(entRows) ? entRows : [];
+              if (!cancelled)
+                setEntitlements({
+                  professionalProfile: rows.some(
+                    (r) =>
+                      r.benefit_type === "professional_profile" &&
+                      isActiveEntitlement(r),
+                  ),
+                  profileQr: rows.some(
+                    (r) => r.benefit_type === "profile_qr" && isActiveEntitlement(r),
+                  ),
+                });
+            } else {
+              console.warn("Entitlements load failed", { status: entRes.status });
+            }
+          } catch {
+            console.warn("Entitlements load failed");
+          }
+        }
+
         try {
           const userRes = await fetch(
             `${SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(uid)}&select=*&limit=1`,
@@ -820,7 +882,7 @@ export default function PrivateProfileV2() {
     field: "cv_email_public" | "phone_public",
     value: boolean,
   ) => {
-    if (!isPaid) return;
+    if (!hasProfessionalProfile) return;
     try {
       setSaving(true);
       setData((d) => ({ ...d, [field]: value }));
@@ -1161,9 +1223,9 @@ export default function PrivateProfileV2() {
               {data.career_level && (
                 <Meta icon={ShieldCheck}>{data.career_level}</Meta>
               )}
-              {isPaid ? (
+              {hasProfessionalProfile ? (
                 <Meta icon={Crown} className="text-[#E0C58F]">
-                  {data.active_plan}
+                  {t.paidProfile}
                 </Meta>
               ) : (
                 <Meta icon={Lock}>{t.noPlan}</Meta>
@@ -1232,24 +1294,12 @@ export default function PrivateProfileV2() {
                 <p className="text-[10px] text-[#E0C58F] uppercase tracking-widest mb-1">
                   {t.qrStatus}
                 </p>
-                {!isPaid ? (
-                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">
-                    {t.qrLocked}
-                  </p>
-                ) : data.qr_enabled && data.qr_public_url ? (
-                  <>
-                    <p className="text-sm text-[#A8B4CC] leading-[1.8]">
-                      {t.qrReady}
-                    </p>
-                    <button onClick={copyQrLink} className="btn-muted mt-3">
-                      <Copy className="w-3 h-3" /> {copied ? t.copied : t.copy}
-                    </button>
-                  </>
-                ) : (
-                  <p className="text-sm text-[#A8B4CC] leading-[1.8]">
-                    {t.qrSoon}
-                  </p>
-                )}
+                {/* QR is a separate benefit (profile_qr), not functional yet.
+                    Owner-writable qr_enabled / qr_public_url are not trusted,
+                    and there is no QR link or copy action in this step. */}
+                <p className="text-sm text-[#A8B4CC] leading-[1.8]">
+                  {entitlements.profileQr ? t.qrSoon : t.qrLocked}
+                </p>
               </div>
             </div>
           </div>
@@ -1363,7 +1413,7 @@ export default function PrivateProfileV2() {
               label={t.cvEmail}
               value={data.cv_email || "—"}
               enabled={data.cv_email_public}
-              locked={!isPaid}
+              locked={!hasProfessionalProfile}
               lockedText={t.privateLockedFree}
               publicText={t.publicOnPaid}
               onToggle={(next) =>
@@ -1376,7 +1426,7 @@ export default function PrivateProfileV2() {
               label={t.phone}
               value={data.phone || "—"}
               enabled={data.phone_public}
-              locked={!isPaid}
+              locked={!hasProfessionalProfile}
               lockedText={t.privateLockedFree}
               publicText={t.publicOnPaid}
               onToggle={(next) => updateContactVisibility("phone_public", next)}
@@ -1439,7 +1489,7 @@ export default function PrivateProfileV2() {
             {!data.experience.length && (
               <p className="text-xs text-[#e1ebed] italic">{t.noExperience}</p>
             )}
-            {!isPaid && (
+            {!hasProfessionalProfile && (
               <p className="text-[11px] text-[#E0C58F]">{t.upgrade}</p>
             )}
           </div>
