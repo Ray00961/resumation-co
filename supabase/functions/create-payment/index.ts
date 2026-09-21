@@ -596,7 +596,9 @@ Deno.serve(async (req) => {
       },
       special_reference: specialReference,
       notification_url: `${EF_BASE_URL}/webhook-paymob`,
-      redirection_url: `${SUCCESS_REDIRECT}?order=${encodeURIComponent(orderId)}`,
+      // `payment_order`, not `order`: Paymob replaces an `order` parameter on the
+      // return URL with its own numeric order id, which would lose ours.
+      redirection_url: `${SUCCESS_REDIRECT}?payment_order=${encodeURIComponent(orderId)}`,
       expiration: expirationSeconds,
       extras: { payment_order_id: orderId },
     };

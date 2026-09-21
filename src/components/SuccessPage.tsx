@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { supabase } from "../supabase";
+import { resolveCanonicalOrderId } from "../utils/paymentReturn";
 
 // ── Plan display labels ────────────────────────────────────────────────────
 const PLAN_LABELS: Record<string, string> = {
@@ -33,8 +34,6 @@ interface InvoiceData {
 // grants or writes anything, and no Paymob redirect parameter (success, pending,
 // id, amount, currency, hmac, its numeric order id) is ever treated as truth.
 // ══════════════════════════════════════════════════════════════════════════════
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Only columns already granted to `authenticated`. Provider references, the
 // checkout secret, customer snapshots and payment evidence are not requested.
@@ -223,16 +222,16 @@ export default function SuccessPage() {
 
   // ── URL params ─────────────────────────────────────────────────────────────
   // WishMoney path: /success?gid=<generation_id>&tid=<transaction_id>&plan=<plan>
-  // Paymob path:    /success?order=<payment_order UUID>&...Paymob redirect params
+  // Paymob path:    /success?payment_order=<payment_order UUID>&...Paymob params
   //
-  // create-payment sets `order` to our canonical payment_orders UUID, and Paymob
-  // appends its OWN `order` (its numeric order id) plus success/pending/amount/
-  // hmac/etc. So the URL can carry two `order` values in either order. Only the
-  // UUID-shaped one is ours; everything else Paymob appended is ignored.
+  // Paymob replaces any `order` parameter with its own numeric order id, so our
+  // canonical UUID travels as `payment_order`. A UUID-shaped legacy `order` is
+  // still accepted for checkouts created before that change. Everything else
+  // Paymob adds (success, pending, amount, hmac, its numeric order) is ignored.
   const urlGid           = searchParams.get("gid")   || "";
   const urlTid           = searchParams.get("tid")   || "";
   const urlPlan          = searchParams.get("plan")  || "";
-  const canonicalOrderId = searchParams.getAll("order").find((v) => UUID_RE.test(v.trim()))?.trim() || "";
+  const canonicalOrderId = resolveCanonicalOrderId(searchParams);
 
   // WishMoney keeps its legacy path untouched. Every other visit is a
   // canonical-status visit — with or without a usable order id.
