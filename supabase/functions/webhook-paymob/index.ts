@@ -1,20 +1,71 @@
-// Paymob transaction callback — VERIFY ONLY (temporary, pre-settlement).
+// Paymob transaction callback — verify, then settle.
 //
-// This replaces the previously deployed webhook (v9), which read the wrong
-// secret name (PAYMOB_HMAC_SECRET) and therefore SKIPPED verification whenever
-// that variable was unset — it failed open. This version fails closed on every
-// path and still performs NO fulfilment of any kind.
+// Two boundaries, in this order and never the other way round:
 //
-// Deliberately does NOT: settle payment_orders, grant entitlements, issue
-// invoices, award coins, create order_generations, generate CVs, update
-// users/profiles, or activate anything. Settlement arrives in a later step,
-// through a separate server-side path.
+//   1. AUTHENTICITY — the HMAC below. Nothing downstream runs until the
+//      digest matches. The implementation and field ordering are preserved
+//      byte-for-byte from the verify-only version; they are not weakened.
+//   2. BUSINESS TRUTH — public.settle_payment_order, called exactly once with
+//      the provider's SIGNED facts. That function owns the entire atomic
+//      settlement: payment evidence, entitlements, invoice and fulfilment
+//      commit together or not at all.
+//
+// This file therefore grants no entitlement, issues no invoice, awards no
+// coins, creates no generation and updates no user or profile. It transports
+// verified facts and maps outcomes to HTTP status codes.
+//
+// Correlation uses the signed obj.order.id only. merchant_order_id, extras,
+// body.type, query parameters other than the digest, and anything from a
+// browser are never treated as settlement authority.
 //
 // Deployment note: Paymob posts server-to-server and cannot present a user JWT,
-// so this function must stay deployed with verify_jwt = false. Authenticity
-// comes from the HMAC below, never from a JWT.
+// so this function must stay deployed with verify_jwt = false (now pinned in
+// supabase/config.toml). Authenticity comes from the HMAC below, never a JWT.
 
-const PAYMOB_HMAC = Deno.env.get("PAYMOB_HMAC") ?? "";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const PAYMOB_HMAC        = Deno.env.get("PAYMOB_HMAC") ?? "";
+const PAYMOB_ENVIRONMENT = (Deno.env.get("PAYMOB_ENVIRONMENT") ?? "").trim();
+const SUPABASE_URL       = Deno.env.get("SUPABASE_URL") ?? "";
+const SERVICE_KEY        = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+// The integrations this deployment is allowed to settle for. Built once at
+// module load from trusted server configuration — never from the payload.
+const ALLOWED_INTEGRATION_IDS = new Set(
+  [
+    Deno.env.get("PAYMOB_CARD_INTEGRATION_ID"),
+    Deno.env.get("PAYMOB_WALLET_INTEGRATION_ID"),
+  ]
+    .map((value) => (value ?? "").trim())
+    .filter((value) => value.length > 0),
+);
+
+// Environment is a deployment fact. Only these two exact values are accepted.
+const VALID_ENVIRONMENTS = new Set(["test", "live"]);
+
+// Deterministic RPC outcomes. Every one of them is acknowledged with 200,
+// because a Paymob retry cannot change any of them. The second set is the
+// subset that additionally demands human attention.
+const HANDLED_OUTCOMES = new Set([
+  "settled",
+  "already_settled",
+  "ignored_unsuccessful",
+  "ignored_pending",
+  "ignored_reversal",
+]);
+
+const ALERT_OUTCOMES = new Set([
+  "inconsistent_settlement",
+  "conflict_other_transaction",
+  "conflict_transaction_reused",
+  "conflict_terminal_status",
+  "rejected_amount_mismatch",
+  "rejected_currency_mismatch",
+  "rejected_environment_mismatch",
+  "rejected_integration_mismatch",
+  "rejected_provider_mismatch",
+  "order_not_found",
+]);
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -85,6 +136,44 @@ function buildHmacMessage(obj: Record<string, unknown>): string {
   }).join("");
 }
 
+// ── Strict extraction of signed facts ────────────────────────────────────────
+// No coercion. A value of an unexpected type becomes null, and the settlement
+// RPC treats null as the unsafe value in every direction, so a type surprise
+// can only fail closed — never settle by accident.
+
+function signedString(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return null;
+}
+
+function signedBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function signedInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+/** The signed Paymob order id — the ONLY correlation authority. */
+function signedOrderId(transaction: Record<string, unknown>): string | null {
+  const order = transaction["order"];
+  if (order !== null && typeof order === "object") {
+    return signedString((order as Record<string, unknown>)["id"]);
+  }
+  return signedString(order);
+}
+
+/** source_data.type / sub_type only. source_data.pan is never read here. */
+function signedSourceField(transaction: Record<string, unknown>, key: "type" | "sub_type"): string | null {
+  const sd = transaction["source_data"];
+  if (sd === null || typeof sd !== "object" || Array.isArray(sd)) return null;
+  return signedString((sd as Record<string, unknown>)[key]);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
@@ -96,6 +185,23 @@ Deno.serve(async (req) => {
   // Verification is never skipped.
   if (!PAYMOB_HMAC) {
     console.error("webhook-paymob: PAYMOB_HMAC is not configured — rejecting");
+    return json({ error: "webhook_not_configured" }, 503);
+  }
+
+  // FAIL CLOSED: settlement configuration must be complete and unambiguous
+  // before a single byte of the payload is trusted.
+  if (!VALID_ENVIRONMENTS.has(PAYMOB_ENVIRONMENT)) {
+    console.error("webhook-paymob: PAYMOB_ENVIRONMENT must be exactly 'test' or 'live' — rejecting");
+    return json({ error: "webhook_not_configured" }, 503);
+  }
+
+  if (!SUPABASE_URL || !SERVICE_KEY) {
+    console.error("webhook-paymob: Supabase service configuration missing — rejecting");
+    return json({ error: "webhook_not_configured" }, 503);
+  }
+
+  if (ALLOWED_INTEGRATION_IDS.size === 0) {
+    console.error("webhook-paymob: no Paymob integration ids configured — rejecting");
     return json({ error: "webhook_not_configured" }, 503);
   }
 
@@ -145,22 +251,122 @@ Deno.serve(async (req) => {
     return json({ error: "invalid_hmac" }, 403);
   }
 
-  // Verified. Log only non-sensitive correlation identifiers: never the
-  // secret, the digest, card data (source_data.pan), or the payer's details
-  // (owner, billing data).
-  const orderValue = transaction["order"];
-  const orderId = (orderValue !== null && typeof orderValue === "object")
-    ? (orderValue as Record<string, unknown>)["id"]
-    : orderValue;
+  // ════════════════════════════════════════════════════════════════════════
+  // Verified. Everything below reads ONLY fields covered by that digest.
+  // ════════════════════════════════════════════════════════════════════════
+  const providerOrderRef = signedOrderId(transaction);
+  const transactionRef   = signedString(transaction["id"]);
+  const amountCents      = signedInteger(transaction["amount_cents"]);
+  const currency         = signedString(transaction["currency"]);
+  const success          = signedBoolean(transaction["success"]);
+  const pending          = signedBoolean(transaction["pending"]);
+  const errorOccured     = signedBoolean(transaction["error_occured"]);
+  const isRefunded       = signedBoolean(transaction["is_refunded"]);
+  const isVoided         = signedBoolean(transaction["is_voided"]);
+  const integrationId    = signedString(transaction["integration_id"]);
+  const paymentMethod    = signedSourceField(transaction, "type");
+  const paymentSubtype   = signedSourceField(transaction, "sub_type");
 
+  // Log only non-sensitive correlation identifiers: never the secret, the
+  // digest, card data (source_data.pan), or the payer's details (owner,
+  // billing data).
   console.log("webhook-paymob: verified callback", {
-    type: typeof body["type"] === "string" ? body["type"] : null,
-    transactionId: transaction["id"] ?? null,
-    orderId: orderId ?? null,
-    success: transaction["success"] ?? null,
-    pending: transaction["pending"] ?? null,
+    transactionId: transactionRef,
+    orderId: providerOrderRef,
+    success,
+    pending,
+    integrationId,
   });
 
-  // Acknowledge only. No settlement, no entitlement, no invoice, no side effects.
+  // Without both signed references the callback cannot be correlated. This is
+  // deterministic — a retry would carry the same payload — so acknowledge and
+  // alert rather than invite an endless retry loop.
+  if (!providerOrderRef || !transactionRef) {
+    console.error("webhook-paymob: verified callback lacks signed correlation references", {
+      hasOrderId: !!providerOrderRef,
+      hasTransactionId: !!transactionRef,
+    });
+    return json({ received: true, verified: true }, 200);
+  }
+
+  // Integration allow-list — enforced here, where the configuration lives.
+  // A callback from an integration this deployment does not serve is
+  // acknowledged and never reaches settlement.
+  if (!integrationId || !ALLOWED_INTEGRATION_IDS.has(integrationId)) {
+    console.error("webhook-paymob: integration id not allowed for this deployment", {
+      integrationId,
+      orderId: providerOrderRef,
+    });
+    return json({ received: true, verified: true }, 200);
+  }
+
+  // ── The single settlement call ──────────────────────────────────────────
+  // Service-role authority. No user JWT is involved in settlement at any
+  // point. This is the only call site in the file.
+  const db = createClient(SUPABASE_URL, SERVICE_KEY);
+
+  const { data, error } = await db.rpc("settle_payment_order", {
+    p_provider:                 "paymob",
+    p_provider_order_ref:       providerOrderRef,
+    p_provider_transaction_ref: transactionRef,
+    p_amount_cents:             amountCents,
+    p_currency:                 currency,
+    p_success:                  success,
+    p_pending:                  pending,
+    p_error_occured:            errorOccured,
+    p_is_refunded:              isRefunded,
+    p_is_voided:                isVoided,
+    p_integration_id:           integrationId,
+    p_expected_environment:     PAYMOB_ENVIRONMENT,
+    p_payment_method:           paymentMethod,
+    p_payment_subtype:          paymentSubtype,
+  });
+
+  // Transient: the database was unreachable, timed out, or the function
+  // raised. Paymob SHOULD retry, so answer 5xx. The RPC is atomic, so a
+  // failed attempt left nothing behind.
+  if (error) {
+    console.error("webhook-paymob: settlement call failed", {
+      orderId: providerOrderRef,
+      code: error.code ?? null,
+      message: error.message ?? null,
+    });
+    return json({ error: "settlement_unavailable" }, 500);
+  }
+
+  const result = (data ?? {}) as Record<string, unknown>;
+  const outcome = typeof result["outcome"] === "string" ? (result["outcome"] as string) : null;
+  const paymentOrderId = typeof result["payment_order_id"] === "string"
+    ? (result["payment_order_id"] as string)
+    : null;
+
+  // An outcome this deployment does not recognise means the database and this
+  // function are out of step. Treat it as transient rather than silently
+  // acknowledging something we cannot reason about.
+  if (!outcome || (!HANDLED_OUTCOMES.has(outcome) && !ALERT_OUTCOMES.has(outcome))) {
+    console.error("webhook-paymob: unrecognised settlement outcome", {
+      orderId: providerOrderRef,
+      outcome,
+    });
+    return json({ error: "settlement_unavailable" }, 500);
+  }
+
+  // Deterministic outcome. Acknowledge so Paymob stops retrying; alert on the
+  // ones a human must look at.
+  if (ALERT_OUTCOMES.has(outcome)) {
+    console.error("webhook-paymob: settlement refused", {
+      outcome,
+      orderId: providerOrderRef,
+      transactionId: transactionRef,
+      paymentOrderId,
+    });
+  } else {
+    console.log("webhook-paymob: settlement outcome", {
+      outcome,
+      orderId: providerOrderRef,
+      paymentOrderId,
+    });
+  }
+
   return json({ received: true, verified: true }, 200);
 });

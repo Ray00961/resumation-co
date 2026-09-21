@@ -61,3 +61,6 @@ entrypoint = "./functions/generate-career-snapshot/index.ts"
 
 [functions.create-payment]
 verify_jwt = true
+
+[functions.webhook-paymob]
+verify_jwt = false
