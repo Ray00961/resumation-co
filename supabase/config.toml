@@ -64,3 +64,6 @@ verify_jwt = true
 
 [functions.webhook-paymob]
 verify_jwt = false
+
+[functions.generation-worker]
+verify_jwt = false
