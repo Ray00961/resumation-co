@@ -3795,15 +3795,13 @@ export default function ResumeForm() {
                 </div>
               </div>
             ))}
-            {form.work.length < 7 && (
-              <button
-                onClick={() => set("work", [...form.work, createDefaultWork()])}
-                className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-[rgba(86,108,158,0.4)] rounded-lg text-[#7A8FAA] hover:border-[rgba(18,178,193,0.5)] hover:text-[rgba(18,178,193,1)] transition-all text-xs font-medium"
-              >
-                <Plus size={14} />
-                {isRtl ? "إضافة وظيفة أخرى" : "Add Another Job"}
-              </button>
-            )}
+            <button
+              onClick={() => set("work", [...form.work, createDefaultWork()])}
+              className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-[rgba(86,108,158,0.4)] rounded-lg text-[#7A8FAA] hover:border-[rgba(18,178,193,0.5)] hover:text-[rgba(18,178,193,1)] transition-all text-xs font-medium"
+            >
+              <Plus size={14} />
+              {isRtl ? "إضافة وظيفة أخرى" : "Add Another Job"}
+            </button>
           </div>
         )}
 
