@@ -1,4 +1,4 @@
-// Offline tests for generation-worker. No network, no database, no OpenAI:
+// Offline tests for generation-worker. No network, no database, no model provider:
 // the real handleRequest/processJob run against in-memory fakes, and the real
 // DOCX builders run on the repository's sample CVs.
 //
@@ -83,7 +83,7 @@ function claimData(over: Record<string, unknown> = {}) {
 function makeDeps(opts: {
   secret?: string; claim?: unknown; claimError?: boolean;
   form?: Record<string, unknown> | null; formError?: boolean;
-  cvRaw?: string; clRaw?: string; chatThrows?: "cv" | "cl" | "cv_timeout";
+  cvRaw?: string; clRaw?: string; chatThrows?: "cv" | "cl" | "cv_timeout" | "cv_max_tokens" | "cl_refusal";
   uploadFails?: "cv" | "cl"; currentClaim?: boolean;
   finalize?: unknown; finalizeError?: boolean; failOutcome?: string;
 } = {}): { deps: WorkerDeps; rec: Recorder } {
@@ -121,11 +121,13 @@ function makeDeps(opts: {
       rec.chat.push({ system: req.system, user: req.user, model: req.model });
       chatN++;
       if (chatN === 1) {
-        if (opts.chatThrows === "cv") throw new Error("openai_status_500");
+        if (opts.chatThrows === "cv") throw new Error("model_status_500");
+        if (opts.chatThrows === "cv_max_tokens") throw new Error("model_stop_max_tokens");
         if (opts.chatThrows === "cv_timeout") { const e = new Error("aborted"); e.name = "AbortError"; throw e; }
         return opts.cvRaw ?? "```json\n" + JSON.stringify(cvJsonFor(lang)) + "\n```";
       }
-      if (opts.chatThrows === "cl") throw new Error("openai_status_429");
+      if (opts.chatThrows === "cl") throw new Error("model_status_429");
+      if (opts.chatThrows === "cl_refusal") throw new Error("model_stop_refusal");
       return opts.clRaw ?? (lang === "ar" ? AR_LETTER : EN_LETTER);
     },
     async buildCvDocx(cv) { rec.builtCv.push(cv); return new Uint8Array([80, 75, 3, 4]); },
@@ -391,6 +393,27 @@ Deno.test("O fail uses the same job id + claim token", async () => {
   assertEquals(failCall(rec)!.args.p_claim_token, TOKEN);
 });
 
+Deno.test("O2 model failures (CV or cover letter) → fail RPC with a neutral message; no upload, no finalize", async () => {
+  const cases: [Parameters<typeof makeDeps>[0], string, string, number][] = [
+    [{ chatThrows: "cv_max_tokens" }, "cv_generation_failed", "model output truncated", 1],
+    [{ chatThrows: "cv" }, "cv_generation_failed", "model request failed (500)", 1],
+    [{ chatThrows: "cl_refusal" }, "cover_letter_generation_failed", "model refused", 2],
+    [{ chatThrows: "cl" }, "cover_letter_generation_failed", "model request failed (429)", 2],
+  ];
+  for (const [opts, code, message, chatCalls] of cases) {
+    const { deps, rec } = makeDeps(opts);
+    const r = await handleRequest(req(), deps);
+    assertEquals(r.body.outcome, "failed");
+    assertEquals(r.body.error_code, code);
+    assertEquals(failCall(rec)!.args.p_error_code, code);
+    assertEquals(failCall(rec)!.args.p_error_message, message);
+    assertEquals(rec.chat.length, chatCalls, "no extra model call, no in-process retry");
+    assertEquals(rec.uploads.length, 0);
+    assertEquals(rec.builtCv.length, 0);
+    assertEquals(finalizeCall(rec), undefined, "finalize (the only entitlement consumer) is never called");
+  }
+});
+
 // ── P. stale workers never interfere ─────────────────────────────────────────
 Deno.test("P stale claim: finalize says stale/expired → no fail call; lost claim → no upload", async () => {
   for (const outcome of ["rejected_stale_claim", "rejected_lease_expired", "job_not_found"]) {
@@ -461,8 +484,13 @@ Deno.test("R exactly one job per invocation; bounded model calls", async () => {
 
 Deno.test("S/T/U the worker source writes only storage + the 3 RPCs (no entitlement/payment/profile writes)", async () => {
   const dir = new URL(".", import.meta.url);
-  const src = ["index.ts", "worker.ts", "final-cv.ts", "cover-letter.ts"]
+  const src = ["index.ts", "worker.ts", "final-cv.ts", "cover-letter.ts", "anthropic.ts"]
     .map((f) => Deno.readTextFileSync(new URL(f, dir))).join("\n");
+  // Checked on the raw source: the comment stripper below also cuts URLs at "//".
+  for (const t of ["api.openai.com", "OPENAI_API_KEY", "openai_status_", "temperature"]) {
+    assert(!src.includes(t), `worker source still references ${t}`);
+  }
+  assert(src.includes('"https://api.anthropic.com/v1/messages"'));
   const code = src.replace(/\/\/.*$/gm, "");
   assert(!/\.(insert|update|delete)\s*\(/.test(code), "no table insert/update/delete");
   assert(!/\.upsert\s*\(/.test(code), "no table upsert");

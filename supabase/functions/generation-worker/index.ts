@@ -12,52 +12,23 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // @ts-ignore esm.sh default export typing issue (same import as generate-cv)
 import HTMLtoDOCX from "https://esm.sh/html-to-docx@1.8.0?target=deno";
 import { buildCvDocx } from "../generate-cv/docx/builders/build-cv-docx.ts";
-import {
-  type ChatRequest, DOCX_MIME, handleRequest, STORAGE_BUCKET, type WorkerDeps,
-} from "./worker.ts";
+import { DOCX_MIME, handleRequest, STORAGE_BUCKET, type WorkerDeps } from "./worker.ts";
+import { createAnthropicChat } from "./anthropic.ts";
 
 const SUPABASE_URL  = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const OPENAI_KEY    = Deno.env.get("OPENAI_API_KEY") ?? "";
+const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const WORKER_SECRET = Deno.env.get("GENERATION_WORKER_SECRET") ?? "";
 
 const db = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-async function chat(req: ChatRequest): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), req.timeoutMs);
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: req.model,
-        max_tokens: req.maxTokens,
-        temperature: req.temperature,
-        messages: [
-          { role: "system", content: req.system },
-          { role: "user", content: req.user },
-        ],
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      await res.body?.cancel();          // the body may echo input; never read it
-      throw new Error(`openai_status_${res.status}`);
-    }
-    const data = await res.json();
-    const u = data?.usage ?? {};
-    console.log(JSON.stringify({
-      event: "openai_usage", model: req.model,
-      prompt_tokens: u.prompt_tokens ?? null, completion_tokens: u.completion_tokens ?? null,
-    }));
-    return String(data?.choices?.[0]?.message?.content ?? "");
-  } finally {
-    clearTimeout(timer);
-  }
-}
+const chat = createAnthropicChat({
+  apiKey: ANTHROPIC_KEY,
+  fetch: (input, init) => fetch(input, init),
+  log: (e) => console.log(JSON.stringify(e)),
+});
 
 const deps: WorkerDeps = {
   workerSecret: WORKER_SECRET,
@@ -106,7 +77,7 @@ const deps: WorkerDeps = {
 Deno.serve(async (req) => {
   // Configuration must be complete before a job is claimed, so an infra fault
   // never burns one of the job's attempts.
-  if (!SUPABASE_URL || !SERVICE_KEY || !OPENAI_KEY) {
+  if (!SUPABASE_URL || !SERVICE_KEY || !ANTHROPIC_KEY) {
     console.log(JSON.stringify({ event: "worker_not_configured" }));
     return Response.json({ outcome: "worker_not_configured" }, { status: 503 });
   }

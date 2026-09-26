@@ -24,16 +24,17 @@ export const WORKER_SECRET_HEADER = "x-worker-secret";
 export const STORAGE_BUCKET = "cv-documents";
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-// Same models and sampling as the legacy generator. Timeouts keep one attempt
+// Claude Sonnet 5 with thinking disabled (see anthropic.ts); it rejects
+// non-default sampling parameters, so none are sent. Timeouts keep one attempt
 // well inside the 10-minute database lease (worst case ≈ 5.5 minutes).
-export const CV_MODEL = { model: "gpt-4o", maxTokens: 8192, temperature: 0.45, timeoutMs: 180_000 };
-export const CL_MODEL = { model: "gpt-4o", maxTokens: 4096, temperature: 0.55, timeoutMs: 120_000 };
+export const CV_MODEL = { model: "claude-sonnet-5", maxTokens: 8192, timeoutMs: 180_000 };
+export const CL_MODEL = { model: "claude-sonnet-5", maxTokens: 4096, timeoutMs: 120_000 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILE_RE = /^[^/]+\/[^/]+\/[A-Za-z0-9._-]{1,200}\.docx$/;
 
 export interface ChatRequest {
-  model: string; maxTokens: number; temperature: number; timeoutMs: number;
+  model: string; maxTokens: number; timeoutMs: number;
   system: string; user: string;
 }
 
@@ -326,6 +327,12 @@ async function reportFailure(
 /** A short, content-free description of a chat failure. */
 function describeChatError(e: unknown): string {
   if (e instanceof Error && e.name === "AbortError") return "model request timed out";
-  if (e instanceof Error && /^openai_status_\d{3}$/.test(e.message)) return `model request failed (${e.message.slice(14)})`;
+  if (e instanceof Error) {
+    const m = e.message;
+    if (/^model_status_\d{3}$/.test(m)) return `model request failed (${m.slice(13)})`;
+    if (m === "model_stop_max_tokens") return "model output truncated";
+    if (m === "model_stop_refusal") return "model refused";
+    if (m === "model_empty_response") return "model returned no text";
+  }
   return "model request failed";
 }
