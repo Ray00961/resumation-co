@@ -22,6 +22,7 @@ export function normalizeCvJsonV1(cv: CvJsonV1): CvJsonV1 {
     nationality: trim(cv.nationality),
     summary: trim(cv.summary),
     core_competencies: {
+      software_tools: arr<string>(cv.core_competencies?.software_tools),
       technical_skills: arr<string>(cv.core_competencies?.technical_skills),
       industry_knowledge: arr<string>(cv.core_competencies?.industry_knowledge),
       professional_skills: arr<string>(cv.core_competencies?.professional_skills),
@@ -32,5 +33,7 @@ export function normalizeCvJsonV1(cv: CvJsonV1): CvJsonV1 {
     certifications: arr(cv.certifications),
     projects: arr(cv.projects),
     languages: arr(cv.languages),
+    // Kept only when present, so legacy JSON keeps the fixed template order.
+    ...(Array.isArray(cv.section_order) ? { section_order: [...cv.section_order] } : {}),
   };
 }

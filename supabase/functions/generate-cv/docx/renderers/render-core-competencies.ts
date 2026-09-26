@@ -4,13 +4,14 @@ import { renderSectionTitle } from "./render-section-title.ts";
 import { FONT_SIZE, FONT, SPACING } from "../styles/cv-docx-styles.ts";
 
 const LABELS = {
-  en: { section: "Core Competencies", technical: "Technical Skills", industry: "Industry Knowledge", professional: "Professional Skills" },
-  ar: { section: "الكفاءات الأساسية", technical: "المهارات التقنية", industry: "المعرفة بالمجال", professional: "المهارات المهنية" },
+  en: { section: "Core Competencies", software: "Software & Tools", technical: "Technical Skills", industry: "Industry Knowledge", professional: "Professional Skills" },
+  ar: { section: "الكفاءات الأساسية", software: "البرامج والأدوات", technical: "المهارات التقنية", industry: "المعرفة بالمجال", professional: "المهارات المهنية" },
 };
 
 export function renderCoreCompetencies(cv: CvJsonV1): Paragraph[] {
   const { technical_skills: ts, industry_knowledge: ik, professional_skills: ps } = cv.core_competencies;
-  if (!ts.length && !ik.length && !ps.length) return [];
+  const st = cv.core_competencies.software_tools ?? [];
+  if (!st.length && !ts.length && !ik.length && !ps.length) return [];
 
   const isAr = cv.document_language === "ar";
   const font = isAr ? FONT.ar : FONT.en;
@@ -33,6 +34,7 @@ export function renderCoreCompetencies(cv: CvJsonV1): Paragraph[] {
     );
   };
 
+  addRow(L.software, st);
   addRow(L.technical, ts);
   addRow(L.industry, ik);
   addRow(L.professional, ps);

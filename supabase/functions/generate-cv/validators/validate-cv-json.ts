@@ -1,4 +1,4 @@
-import type { CvJsonV1 } from "../schemas/cv-json-v1.ts";
+import { CV_SECTION_KEYS } from "../schemas/cv-json-v1.ts";
 
 const ALLOWED_LANGUAGES = ["en", "ar"];
 const ALLOWED_LEVELS = ["fresh_graduate", "junior", "mid", "senior", "executive"];
@@ -48,6 +48,29 @@ export function validateCvJsonV1(data: unknown): ValidationResult {
     const cc = cv.core_competencies as Record<string, unknown>;
     for (const g of ["technical_skills", "industry_knowledge", "professional_skills"]) {
       if (!Array.isArray(cc[g])) errors.push(`core_competencies.${g} must be an array`);
+    }
+    // Optional: absent is valid (legacy JSON); present must be string[].
+    if (cc.software_tools !== undefined) {
+      if (!Array.isArray(cc.software_tools)) {
+        errors.push("core_competencies.software_tools must be an array");
+      } else if (cc.software_tools.some((s) => typeof s !== "string")) {
+        errors.push("core_competencies.software_tools must contain only strings");
+      }
+    }
+  }
+
+  // Optional: absent is valid (legacy JSON); present must be unique known keys.
+  if (cv.section_order !== undefined) {
+    if (!Array.isArray(cv.section_order)) {
+      errors.push("section_order must be an array");
+    } else {
+      const seen = new Set<string>();
+      cv.section_order.forEach((k, i) => {
+        if (typeof k !== "string") errors.push(`section_order[${i}] must be a string`);
+        else if (!(CV_SECTION_KEYS as readonly string[]).includes(k)) errors.push(`section_order[${i}] is not a known section`);
+        else if (seen.has(k)) errors.push(`section_order[${i}] is a duplicate`);
+        else seen.add(k);
+      });
     }
   }
 

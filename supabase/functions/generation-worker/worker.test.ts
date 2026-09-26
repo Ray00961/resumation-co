@@ -286,6 +286,24 @@ Deno.test("G2 invalid model CV never reaches DOCX, storage or finalize", async (
   }
 });
 
+Deno.test("G3 section_order + software_tools reach finalize and DOCX; schema version stays cv-json-v1", async () => {
+  const cv = cvJsonFor("en", { section_order: ["education", "experience", "summary"] });
+  (cv.core_competencies as Record<string, unknown>).software_tools = [" Excel ", ""];
+  const { deps, rec } = makeDeps({ cvRaw: JSON.stringify(cv) });
+  assertEquals((await handleRequest(req(), deps)).body.outcome, "succeeded");
+  const fin = finalizeCall(rec)!.args;
+  const sent = fin.p_cv_json as Record<string, unknown>;
+  assertEquals(sent.section_order, ["education", "experience", "summary"]);
+  assertEquals((sent.core_competencies as Record<string, string[]>).software_tools, ["Excel"]);
+  assertEquals(fin.p_cv_json_schema_version, "cv-json-v1");
+  assertEquals(rec.builtCv[0], sent);
+
+  const bad = makeDeps({ cvRaw: JSON.stringify(cvJsonFor("en", { section_order: ["summary", "summary"] })) });
+  assertEquals((await handleRequest(req(), bad.deps)).body.error_code, "cv_validation_failed");
+  assertEquals(finalizeCall(bad.rec), undefined);
+  assertEquals(bad.rec.builtCv.length, 0);
+});
+
 // ── I. cover letter language + grounding ─────────────────────────────────────
 Deno.test("I cover letter: grounded in final CV, frozen language enforced", async () => {
   const ok = makeDeps();

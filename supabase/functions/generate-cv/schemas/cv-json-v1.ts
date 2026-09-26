@@ -6,6 +6,8 @@ export interface ContactInfo {
 }
 
 export interface CoreCompetencies {
+  /** Optional in incoming JSON; normalized to [] when absent. */
+  software_tools?: string[];
   technical_skills: string[];
   industry_knowledge: string[];
   professional_skills: string[];
@@ -46,7 +48,29 @@ export interface LanguageItem {
   level: string;
 }
 
+/**
+ * Body sections a CV may order via section_order, in canonical order. The
+ * header always renders first and is never part of section_order.
+ */
+export const CV_SECTION_KEYS = [
+  "summary",
+  "core_competencies",
+  "experience",
+  "education",
+  "internships",
+  "projects",
+  "certifications",
+  "languages",
+] as const;
+
+export type CvSectionKey = typeof CV_SECTION_KEYS[number];
+
 export interface CvJsonV1 {
+  /**
+   * Optional. When present: unique keys from CV_SECTION_KEYS. When absent the
+   * DOCX uses the fixed template order for the candidate level and language.
+   */
+  section_order?: CvSectionKey[];
   document_language: "en" | "ar";
   candidate_level: "fresh_graduate" | "junior" | "mid" | "senior" | "executive";
   full_name: string;

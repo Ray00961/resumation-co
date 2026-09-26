@@ -12,7 +12,7 @@
 //   5. normalizeCvJsonV1   : legacy normalizer (contact_line fallback)
 
 import type {
-  CvJsonV1, ExperienceItem, EducationItem, CertificationItem, ProjectItem, LanguageItem,
+  CvJsonV1, CvSectionKey, ExperienceItem, EducationItem, CertificationItem, ProjectItem, LanguageItem,
 } from "../generate-cv/schemas/cv-json-v1.ts";
 import { validateCvJsonV1 } from "../generate-cv/validators/validate-cv-json.ts";
 import { normalizeCvJsonV1 } from "../generate-cv/validators/normalize-cv-json.ts";
@@ -164,6 +164,7 @@ export function toFinalCvJsonV1(parsed: unknown, language: "en" | "ar"): CvJsonV
     nationality: str(cv, "nationality", "cv"),
     summary: str(cv, "summary", "cv"),
     core_competencies: {
+      software_tools: strList(cc.software_tools, "core_competencies.software_tools"),
       technical_skills: strList(cc.technical_skills, "core_competencies.technical_skills"),
       industry_knowledge: strList(cc.industry_knowledge, "core_competencies.industry_knowledge"),
       professional_skills: strList(cc.professional_skills, "core_competencies.professional_skills"),
@@ -174,6 +175,11 @@ export function toFinalCvJsonV1(parsed: unknown, language: "en" | "ar"): CvJsonV
     certifications: items(cv.certifications, "certifications", certificationItem, allBlank),
     projects: items(cv.projects, "projects", projectItem, allBlank),
     languages: items(cv.languages, "languages", languageItem, allBlank),
+    // Already checked by validateCvJsonV1 (unique, known keys). Absent stays
+    // absent so the DOCX keeps the legacy template order.
+    ...(Array.isArray(cv.section_order)
+      ? { section_order: [...(cv.section_order as CvSectionKey[])] }
+      : {}),
   };
 
   if (!rebuilt.full_name) {
